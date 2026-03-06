@@ -139,20 +139,25 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       }
       richItems.sort((a, b) => a.vy - b.vy)
 
-      // Cluster into text blocks: new block when Y-gap > 1.8× font size
+      // Cluster into text blocks.
+      // New block when: Y-gap > 1.8× font size  OR  font size changes significantly.
+      // Font-size change catches headline → subline transitions (large → small text).
       const positionalBlocks: RichItem[][] = []
       for (const item of richItems) {
         const last = positionalBlocks[positionalBlocks.length - 1]
         const lastItem = last?.[last.length - 1]
         const gap = lastItem ? item.vy - lastItem.vy : Infinity
-        const threshold = Math.max((lastItem?.fontSize ?? 12) * 1.8, 8)
-        if (!last || gap > threshold) positionalBlocks.push([item])
+        const yThreshold = Math.max((lastItem?.fontSize ?? 12) * 1.8, 8)
+        const fsRatio = lastItem ? item.fontSize / lastItem.fontSize : 1
+        const fontSizeChanged = fsRatio < 0.72 || fsRatio > 1.4
+        if (!last || gap > yThreshold || fontSizeChanged) positionalBlocks.push([item])
         else last.push(item)
       }
 
       console.log('[AI Import] Positional blocks:', positionalBlocks.map(b => b.map(i => i.str).join(' ')))
 
-      // ── Hide starred OCGs, render background ─────────────────────────────
+      // ── Render background ─────────────────────────────────────────────────
+      // Try OCG visibility first; paint-over approach handles fallback below.
       for (const { id } of starredOCGs) {
         try { ocgConfig.setVisibility(id, false) } catch { /* unsupported */ }
       }
@@ -167,42 +172,76 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         canvas: bgCanvas, canvasContext: bgCtx, viewport: renderVp,
         optionalContentConfigPromise: Promise.resolve(ocgConfig),
       }).promise
-      setBackgroundUrl(bgCanvas.toDataURL('image/png'))
 
-      // ── Build editable fields ─────────────────────────────────────────────
-      // Strategy: use positional blocks as the primary source of text.
-      // Starred OCG names (if found) are used as field labels.
-      // If no starred OCGs were found, label fields by font size heuristic.
-      const extractedFields: AIEditableField[] = []
-
+      // ── Determine field names ─────────────────────────────────────────────
       const fieldNames: string[] = starredOCGs.length > 0
-        ? starredOCGs.map(g => g.name.replace(/^\s*\*/, '')) // strip leading * and spaces
+        ? starredOCGs.map(g => g.name.replace(/^\s*\*/, '').trim())
         : positionalBlocks.map((block, i) => {
             const avgFs = block.reduce((s, it) => s + it.fontSize, 0) / block.length
-            if (i === 0 && avgFs >= 20) return 'Headline'
+            if (i === 0 && avgFs >= 18) return 'Headline'
             if (i === 1) return 'Subline'
             return `Text ${i + 1}`
           })
 
-      const numFields = Math.min(fieldNames.length, positionalBlocks.length)
+      // We always create one field per starred-layer name.
+      // If fewer positional blocks exist than names, later fields get empty text.
+      const extractedFields: AIEditableField[] = []
 
-      for (let i = 0; i < numFields; i++) {
+      for (let i = 0; i < fieldNames.length; i++) {
         const block = positionalBlocks[i]
+        if (!block) {
+          // Starred layer exists in AI but no text block found for it → placeholder
+          extractedFields.push({
+            layerName: fieldNames[i], value: '', originalText: '',
+            x: 0.05, y: 0.05 + i * 0.2, width: 0.6,
+            fontSize: 24, color: '#ffffff', fontWeight: 'normal', fontStyle: 'normal', textAlign: 'left',
+          })
+          continue
+        }
+
         const sorted = [...block].sort((a, b) => a.vx - b.vx)
         const text = sorted.map(it => it.str).join(' ').trim()
-        if (!text) continue
 
-        const topItem = block.reduce((best, cur) => cur.vy < best.vy ? cur : best)
-        const fs = topItem.fontSize
+        const topVy = Math.min(...block.map(it => it.vy - it.fontSize))
+        const bottomVy = Math.max(...block.map(it => it.vy))
         const minVx = Math.min(...block.map(it => it.vx))
-        const maxVx = Math.max(...block.map(it => it.vx + it.width))
+        const rawMaxVx = Math.max(...block.map(it => {
+          const w = it.width > 2 ? it.width : it.str.length * it.fontSize * 0.55
+          return it.vx + w
+        }))
+        const maxVx = Math.min(rawMaxVx, vp1.width * 0.95)
+        const fs = block[0].fontSize
+
+        // ── Paint-over: erase original text from background canvas ──────────
+        // Samples the color just OUTSIDE the text bounding box and fills over it,
+        // so the editable overlay doesn't produce a double-text effect.
+        const pad = Math.ceil(fs * renderScale * 0.25)
+        const cx = Math.max(0, Math.floor(minVx * renderScale) - pad)
+        const cy = Math.max(0, Math.floor(topVy * renderScale) - pad)
+        const cw = Math.min(bgCanvas.width - cx, Math.ceil((maxVx - minVx) * renderScale) + pad * 2)
+        const ch = Math.min(bgCanvas.height - cy, Math.ceil((bottomVy - topVy) * renderScale) + pad * 2)
+
+        if (cw > 0 && ch > 0) {
+          // Sample a horizontal strip ABOVE the box (or below if at top)
+          const sampleY = cy > 10 ? cy - 8 : Math.min(cy + ch + 4, bgCanvas.height - 2)
+          const sampleX = cx
+          const sampleW = Math.min(cw, bgCanvas.width - sampleX)
+          if (sampleW > 0 && sampleY >= 0 && sampleY < bgCanvas.height) {
+            const px = bgCtx.getImageData(sampleX, sampleY, sampleW, 1).data
+            let r = 0, g = 0, b = 0
+            for (let p = 0; p < px.length; p += 4) { r += px[p]; g += px[p + 1]; b += px[p + 2] }
+            const n = px.length / 4
+            bgCtx.fillStyle = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`
+            bgCtx.fillRect(cx, cy, cw, ch)
+          }
+        }
 
         extractedFields.push({
           layerName: fieldNames[i],
           value: text,
           originalText: text,
           x: Math.max(0, minVx / vp1.width),
-          y: Math.max(0, (topItem.vy - fs) / vp1.height),
+          y: Math.max(0, topVy / vp1.height),
           width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
           fontSize: fs,
           color: '#ffffff',
@@ -211,6 +250,8 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           textAlign: 'left',
         })
       }
+
+      setBackgroundUrl(bgCanvas.toDataURL('image/png'))
 
       setFields(extractedFields)
       setStep('fields')
