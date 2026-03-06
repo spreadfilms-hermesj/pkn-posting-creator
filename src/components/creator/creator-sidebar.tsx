@@ -106,54 +106,38 @@ export function CreatorSidebar({ config, updateConfig }: CreatorSidebarProps) {
                         className="w-full px-3 py-2 bg-white/5 border border-white/20 text-white rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none"
                         rows={field.value.includes('\n') ? 3 : 2}
                       />
-                      {/* Position & Size controls */}
-                      <div className="grid grid-cols-3 gap-2">
-                        <div>
-                          <p className="text-xs text-gray-500 mb-1">X (%)</p>
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            step={0.1}
-                            value={Math.round(field.x * 1000) / 10}
-                            onChange={(e) => updateField({ x: parseFloat(e.target.value) / 100 })}
-                            className="w-full px-2 py-1.5 bg-white/5 border border-white/20 text-white rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                          />
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500 mb-1">Y (%)</p>
-                          <input
-                            type="number"
-                            min={0}
-                            max={100}
-                            step={0.1}
-                            value={Math.round(field.y * 1000) / 10}
-                            onChange={(e) => updateField({ y: parseFloat(e.target.value) / 100 })}
-                            className="w-full px-2 py-1.5 bg-white/5 border border-white/20 text-white rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                          />
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500 mb-1">Größe (px)</p>
-                          <input
-                            type="number"
-                            min={1}
-                            step={1}
-                            value={Math.round(field.fontSize)}
-                            onChange={(e) => updateField({ fontSize: parseFloat(e.target.value) })}
-                            className="w-full px-2 py-1.5 bg-white/5 border border-white/20 text-white rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                          />
-                        </div>
-                      </div>
-                      {/* Color */}
-                      <div className="flex items-center gap-2">
-                        <p className="text-xs text-gray-500">Farbe</p>
+                      {/* Compact controls row */}
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <span className="text-gray-500 shrink-0">X</span>
+                        <input
+                          type="number"
+                          min={0} max={100} step={0.1}
+                          value={Math.round(field.x * 1000) / 10}
+                          onChange={(e) => updateField({ x: parseFloat(e.target.value) / 100 })}
+                          className="w-14 px-1.5 py-1 bg-white/5 border border-white/20 text-white rounded text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                        />
+                        <span className="text-gray-500 shrink-0">Y</span>
+                        <input
+                          type="number"
+                          min={0} max={100} step={0.1}
+                          value={Math.round(field.y * 1000) / 10}
+                          onChange={(e) => updateField({ y: parseFloat(e.target.value) / 100 })}
+                          className="w-14 px-1.5 py-1 bg-white/5 border border-white/20 text-white rounded text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                        />
+                        <span className="text-gray-500 shrink-0">px</span>
+                        <input
+                          type="number"
+                          min={1} step={1}
+                          value={Math.round(field.fontSize)}
+                          onChange={(e) => updateField({ fontSize: parseFloat(e.target.value) })}
+                          className="w-14 px-1.5 py-1 bg-white/5 border border-white/20 text-white rounded text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                        />
                         <input
                           type="color"
                           value={field.color.startsWith('#') ? field.color : '#ffffff'}
                           onChange={(e) => updateField({ color: e.target.value })}
-                          className="w-7 h-7 rounded cursor-pointer bg-transparent border border-white/20"
+                          className="w-6 h-6 rounded cursor-pointer bg-transparent border border-white/20 shrink-0"
                         />
-                        <span className="text-xs text-gray-500 font-mono">{field.color}</span>
                       </div>
                     </div>
                   )
