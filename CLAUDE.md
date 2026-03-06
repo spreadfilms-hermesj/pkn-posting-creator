@@ -47,7 +47,10 @@ Uses `pdfjs-dist` (v5, loaded dynamically on the client) to parse `.ai` files as
 2. Reads Optional Content Groups (OCGs) — each Illustrator layer becomes one
 3. Layers whose name starts with `*` are "editable"; their OCG visibility is set to `false` before rendering the background
 4. Text content is extracted per-OCG via `getTextContent({ includeMarkedContent: true })` — marked content items with `type === 'beginMarkedContentProps'` carry the OCG `id`
-5. Field positions are derived from text item `transform` matrices converted via `viewport.convertToViewportPoint()`
+5. Text extraction uses two strategies in priority order:
+   - **OCG-ID matching** (stack-based, handles nested layers): walks `getTextContent({ includeMarkedContent: true })` items using a push/pop stack for `beginMarkedContent`/`endMarkedContent` events, assigns text to the innermost starred OCG on the stack
+   - **Positional block grouping** (fallback per layer): clusters all text items by Y-gap relative to font size, assigns the N-th block to the N-th starred layer in top-to-bottom order — reliable even when OCG IDs don't match
+6. Field positions are derived from text item `transform` matrices converted via `viewport.convertToViewportPoint()`
 
 The pdfjs worker is loaded from unpkg CDN: `https://unpkg.com/pdfjs-dist@{version}/build/pdf.worker.min.mjs`
 
