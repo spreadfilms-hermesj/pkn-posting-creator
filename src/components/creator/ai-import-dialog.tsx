@@ -105,47 +105,29 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const page = await pdf.getPage(artboard.pageNum)
       const vp1 = page.getViewport({ scale: 1 })
 
-      // Collect OCG layers
+      // ── Collect all OCGs + find starred ones ──────────────────────────────
       const ocgConfig = await pdf.getOptionalContentConfig()
-      const starredOCGs: { id: string; name: string }[] = []
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      for (const [id, group] of Array.from(ocgConfig as unknown as Map<string, { name: string }>)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const g = group as any
-        if (g?.name?.startsWith('*')) {
-          starredOCGs.push({ id: id as string, name: g.name })
-        }
-      }
 
-      // ── Step A: Try OCG-ID-based text mapping (stack-based for nested layers) ──
+      const allOCGs: { id: string; name: string }[] = []
+      const starredOCGs: { id: string; name: string }[] = []
+      try {
+        for (const entry of Array.from(ocgConfig as unknown as Iterable<[unknown, unknown]>)) {
+          const [id, group] = entry as [string, { name?: string }]
+          const name = (group as { name?: string })?.name ?? ''
+          if (name) allOCGs.push({ id, name })
+          // Match * prefix, trim whitespace, also catch leading space + *
+          if (name.trimStart().startsWith('*')) starredOCGs.push({ id, name: name.trim() })
+        }
+      } catch { /* OCG iteration not supported */ }
+
+      // Debug — open browser console to see all layer names
+      console.log('[AI Import] All OCGs:', allOCGs.map(g => `${g.id}: "${g.name}"`))
+      console.log('[AI Import] Starred OCGs:', starredOCGs)
+
+      // ── Extract text content ──────────────────────────────────────────────
       const textContent = await page.getTextContent({ includeMarkedContent: true })
 
-      // Stack handles nested BDC/EMC correctly
-      const idStack: string[] = []
-      const textByOCGId: Record<string, { texts: string[]; items: { transform: number[]; str: string; width?: number }[] }> = {}
-
-      for (const item of textContent.items) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const mc = item as any
-        if (mc.type === 'beginMarkedContent' || mc.type === 'beginMarkedContentProps') {
-          if (mc.id) idStack.push(mc.id)
-        } else if (mc.type === 'endMarkedContent') {
-          idStack.pop()
-        } else if (typeof mc.str === 'string' && mc.str.trim()) {
-          // Assign to the innermost starred OCG on the stack
-          const starredId = [...idStack].reverse().find(id => starredOCGs.some(g => g.id === id))
-          if (starredId) {
-            if (!textByOCGId[starredId]) textByOCGId[starredId] = { texts: [], items: [] }
-            textByOCGId[starredId].texts.push(mc.str)
-            textByOCGId[starredId].items.push(mc)
-          }
-        }
-      }
-
-      // ── Step B: Positional block grouping (reliable fallback) ──
-      // Group all text items into blocks separated by significant Y gaps.
-      // This works regardless of OCG ID matching.
-      type RichItem = { str: string; vx: number; vy: number; fontSize: number; width: number; transform: number[] }
+      type RichItem = { str: string; vx: number; vy: number; fontSize: number; width: number }
       const richItems: RichItem[] = []
       for (const item of textContent.items) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -153,25 +135,24 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         if (typeof it.str !== 'string' || !it.str.trim()) continue
         const [vx, vy] = vp1.convertToViewportPoint(it.transform[4], it.transform[5])
         const fontSize = Math.abs(it.transform[3]) || Math.abs(it.transform[0]) || 12
-        richItems.push({ str: it.str, vx, vy, fontSize, width: it.width ?? 0, transform: it.transform })
+        richItems.push({ str: it.str, vx, vy, fontSize, width: it.width ?? 0 })
       }
       richItems.sort((a, b) => a.vy - b.vy)
 
-      // Cluster into blocks: a new block starts when the Y gap > 1.5× the avg font size
+      // Cluster into text blocks: new block when Y-gap > 1.8× font size
       const positionalBlocks: RichItem[][] = []
       for (const item of richItems) {
         const last = positionalBlocks[positionalBlocks.length - 1]
         const lastItem = last?.[last.length - 1]
         const gap = lastItem ? item.vy - lastItem.vy : Infinity
         const threshold = Math.max((lastItem?.fontSize ?? 12) * 1.8, 8)
-        if (!last || gap > threshold) {
-          positionalBlocks.push([item])
-        } else {
-          last.push(item)
-        }
+        if (!last || gap > threshold) positionalBlocks.push([item])
+        else last.push(item)
       }
 
-      // ── Step C: Hide starred OCGs and render background ──
+      console.log('[AI Import] Positional blocks:', positionalBlocks.map(b => b.map(i => i.str).join(' ')))
+
+      // ── Hide starred OCGs, render background ─────────────────────────────
       for (const { id } of starredOCGs) {
         try { ocgConfig.setVisibility(id, false) } catch { /* unsupported */ }
       }
@@ -183,64 +164,41 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       bgCanvas.height = Math.round(renderVp.height)
       const bgCtx = bgCanvas.getContext('2d')!
       await page.render({
-        canvas: bgCanvas,
-        canvasContext: bgCtx,
-        viewport: renderVp,
+        canvas: bgCanvas, canvasContext: bgCtx, viewport: renderVp,
         optionalContentConfigPromise: Promise.resolve(ocgConfig),
       }).promise
-      const bgUrl = bgCanvas.toDataURL('image/png')
-      setBackgroundUrl(bgUrl)
+      setBackgroundUrl(bgCanvas.toDataURL('image/png'))
 
-      // ── Step D: Build editable fields ──
-      // Prefer OCG-ID mapping; fall back to positional blocks per starred layer.
+      // ── Build editable fields ─────────────────────────────────────────────
+      // Strategy: use positional blocks as the primary source of text.
+      // Starred OCG names (if found) are used as field labels.
+      // If no starred OCGs were found, label fields by font size heuristic.
       const extractedFields: AIEditableField[] = []
 
-      // Debug: log what was found (visible in browser devtools)
-      console.log('[AI Import] Starred OCGs:', starredOCGs)
-      console.log('[AI Import] Text by OCG ID:', Object.fromEntries(Object.entries(textByOCGId).map(([k, v]) => [k, v.texts])))
-      console.log('[AI Import] Positional blocks:', positionalBlocks.map(b => b.map(i => i.str).join(' ')))
-
-      starredOCGs.forEach(({ id, name }, idx) => {
-        const ocgData = textByOCGId[id]
-        const hasOCGText = ocgData && ocgData.texts.length > 0
-
-        let text: string
-        let items: RichItem[]
-
-        if (hasOCGText) {
-          // OCG-ID matching worked — use it
-          text = ocgData.texts.join(' ').trim()
-          items = ocgData.items.map(it => {
-            const [vx, vy] = vp1.convertToViewportPoint(it.transform[4], it.transform[5])
-            return { str: it.str, vx, vy, fontSize: Math.abs(it.transform[3]) || 12, width: it.width ?? 0, transform: it.transform }
+      const fieldNames: string[] = starredOCGs.length > 0
+        ? starredOCGs.map(g => g.name.replace(/^\s*\*/, '')) // strip leading * and spaces
+        : positionalBlocks.map((block, i) => {
+            const avgFs = block.reduce((s, it) => s + it.fontSize, 0) / block.length
+            if (i === 0 && avgFs >= 20) return 'Headline'
+            if (i === 1) return 'Subline'
+            return `Text ${i + 1}`
           })
-        } else {
-          // Positional fallback: grab the idx-th block
-          const block = positionalBlocks[idx]
-          if (!block) {
-            extractedFields.push({
-              layerName: name.slice(1),
-              value: '',
-              originalText: '',
-              x: 0.05, y: 0.05 + idx * 0.2, width: 0.6,
-              fontSize: 36, color: '#ffffff', fontWeight: 'bold', fontStyle: 'normal', textAlign: 'left',
-            })
-            return
-          }
-          // Sort block items left-to-right and concatenate
-          const sorted = [...block].sort((a, b) => a.vx - b.vx)
-          text = sorted.map(i => i.str).join(' ').trim()
-          items = block
-        }
 
-        // Derive position from items
-        const topItem = items.reduce((best, cur) => cur.vy < best.vy ? cur : best)
+      const numFields = Math.min(fieldNames.length, positionalBlocks.length)
+
+      for (let i = 0; i < numFields; i++) {
+        const block = positionalBlocks[i]
+        const sorted = [...block].sort((a, b) => a.vx - b.vx)
+        const text = sorted.map(it => it.str).join(' ').trim()
+        if (!text) continue
+
+        const topItem = block.reduce((best, cur) => cur.vy < best.vy ? cur : best)
         const fs = topItem.fontSize
-        const minVx = Math.min(...items.map(i => i.vx))
-        const maxVx = Math.max(...items.map(i => i.vx + i.width))
+        const minVx = Math.min(...block.map(it => it.vx))
+        const maxVx = Math.max(...block.map(it => it.vx + it.width))
 
         extractedFields.push({
-          layerName: name.slice(1),
+          layerName: fieldNames[i],
           value: text,
           originalText: text,
           x: Math.max(0, minVx / vp1.width),
@@ -252,7 +210,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           fontStyle: 'normal',
           textAlign: 'left',
         })
-      })
+      }
 
       setFields(extractedFields)
       setStep('fields')
@@ -422,9 +380,9 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                   )}
 
                   {fields.length === 0 ? (
-                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 text-sm text-yellow-300">
-                      Keine Layer mit <code className="bg-white/10 px-1 rounded">*</code> Präfix gefunden.
-                      Der Artboard wird ohne editierbare Felder importiert.
+                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 text-sm text-yellow-300 space-y-1">
+                      <p className="font-semibold">Kein Text im Artboard gefunden.</p>
+                      <p>Stelle sicher, dass die .ai Datei mit <span className="text-white">PDF-Kompatibilität</span> gespeichert wurde und dass der Artboard Text enthält.</p>
                     </div>
                   ) : (
                     <div className="space-y-4">
