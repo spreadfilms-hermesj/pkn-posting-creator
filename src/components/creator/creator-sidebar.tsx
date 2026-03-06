@@ -84,28 +84,80 @@ export function CreatorSidebar({ config, updateConfig }: CreatorSidebarProps) {
                 Entfernen
               </button>
             </div>
-            <div className="px-6 pb-6 space-y-4">
+            <div className="px-6 pb-6 space-y-5">
               {config.aiImport.editableFields.length === 0 ? (
                 <p className="text-sm text-gray-400">Keine editierbaren Felder (keine Layer mit * Präfix gefunden).</p>
               ) : (
-                config.aiImport.editableFields.map((field, i) => (
-                  <div key={i}>
-                    <Label className="text-gray-300 flex items-center gap-2 mb-2">
-                      <span className="font-mono text-xs bg-white/10 px-2 py-0.5 rounded text-cyan-400">*{field.layerName}</span>
-                    </Label>
-                    <textarea
-                      value={field.value}
-                      onChange={(e) => {
-                        const updated = config.aiImport!.editableFields.map((f, fi) =>
-                          fi === i ? { ...f, value: e.target.value } : f
-                        )
-                        updateConfig({ aiImport: { ...config.aiImport!, editableFields: updated } })
-                      }}
-                      className="w-full px-3 py-2 bg-white/5 border border-white/20 text-white rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none"
-                      rows={field.value.includes('\n') ? 3 : 2}
-                    />
-                  </div>
-                ))
+                config.aiImport.editableFields.map((field, i) => {
+                  const updateField = (updates: Partial<typeof field>) => {
+                    const updated = config.aiImport!.editableFields.map((f, fi) =>
+                      fi === i ? { ...f, ...updates } : f
+                    )
+                    updateConfig({ aiImport: { ...config.aiImport!, editableFields: updated } })
+                  }
+                  return (
+                    <div key={i} className="space-y-2">
+                      <Label className="text-gray-300 flex items-center gap-2">
+                        <span className="font-mono text-xs bg-white/10 px-2 py-0.5 rounded text-cyan-400">*{field.layerName}</span>
+                      </Label>
+                      <textarea
+                        value={field.value}
+                        onChange={(e) => updateField({ value: e.target.value })}
+                        className="w-full px-3 py-2 bg-white/5 border border-white/20 text-white rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none"
+                        rows={field.value.includes('\n') ? 3 : 2}
+                      />
+                      {/* Position & Size controls */}
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">X (%)</p>
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={0.1}
+                            value={Math.round(field.x * 1000) / 10}
+                            onChange={(e) => updateField({ x: parseFloat(e.target.value) / 100 })}
+                            className="w-full px-2 py-1.5 bg-white/5 border border-white/20 text-white rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                          />
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Y (%)</p>
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            step={0.1}
+                            value={Math.round(field.y * 1000) / 10}
+                            onChange={(e) => updateField({ y: parseFloat(e.target.value) / 100 })}
+                            className="w-full px-2 py-1.5 bg-white/5 border border-white/20 text-white rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                          />
+                        </div>
+                        <div>
+                          <p className="text-xs text-gray-500 mb-1">Größe (px)</p>
+                          <input
+                            type="number"
+                            min={1}
+                            step={1}
+                            value={Math.round(field.fontSize)}
+                            onChange={(e) => updateField({ fontSize: parseFloat(e.target.value) })}
+                            className="w-full px-2 py-1.5 bg-white/5 border border-white/20 text-white rounded-md text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
+                          />
+                        </div>
+                      </div>
+                      {/* Color */}
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs text-gray-500">Farbe</p>
+                        <input
+                          type="color"
+                          value={field.color.startsWith('#') ? field.color : '#ffffff'}
+                          onChange={(e) => updateField({ color: e.target.value })}
+                          className="w-7 h-7 rounded cursor-pointer bg-transparent border border-white/20"
+                        />
+                        <span className="text-xs text-gray-500 font-mono">{field.color}</span>
+                      </div>
+                    </div>
+                  )
+                })
               )}
             </div>
           </div>
