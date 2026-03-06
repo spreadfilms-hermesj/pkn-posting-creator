@@ -124,226 +124,310 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       console.log('[AI Import] All OCGs:', allOCGs.map(g => `${g.id}: "${g.name}"`))
       console.log('[AI Import] Starred OCGs:', starredOCGs)
 
-      // ── Extract text content ──────────────────────────────────────────────
+      // ── Extract text content, grouped by OCG via marked content markers ────
+      // getTextContent with includeMarkedContent returns both text items and
+      // beginMarkedContentProps/endMarkedContent markers. OC-tagged markers
+      // tell us exactly which OCG each text item belongs to.
       const textContent = await page.getTextContent({ includeMarkedContent: true })
 
       type RichItem = { str: string; vx: number; vy: number; fontSize: number; width: number }
-      const richItems: RichItem[] = []
-      for (const item of textContent.items) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const it = item as any
-        if (typeof it.str !== 'string' || !it.str.trim()) continue
-        const [vx, vy] = vp1.convertToViewportPoint(it.transform[4], it.transform[5])
-        const fontSize = Math.abs(it.transform[3]) || Math.abs(it.transform[0]) || 12
-        richItems.push({ str: it.str, vx, vy, fontSize, width: it.width ?? 0 })
+      // Map from OCG ID → text items found in that OCG's marked content section
+      const ocgTextMap = new Map<string, RichItem[]>()
+      // Text items outside any OC group (for fallback)
+      const ungroupedItems: RichItem[] = []
+
+      {
+        let currentOCGId: string | null = null
+        let mcDepth = 0
+        let ocgStartDepth = -1
+        for (const item of textContent.items) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const it = item as any
+          if (it.type === 'beginMarkedContentProps' && it.tag === 'OC') {
+            mcDepth++
+            if (currentOCGId === null) {
+              // Use the id field directly, or fall back to checking the properties object
+              const ocId = it.id ?? it.properties?.id ?? it.properties?.OCMD?.id ?? null
+              if (ocId) { currentOCGId = String(ocId); ocgStartDepth = mcDepth }
+            }
+          } else if (it.type === 'beginMarkedContent' || it.type === 'beginMarkedContentProps') {
+            mcDepth++
+          } else if (it.type === 'endMarkedContent') {
+            if (mcDepth === ocgStartDepth) { currentOCGId = null; ocgStartDepth = -1 }
+            mcDepth = Math.max(0, mcDepth - 1)
+          } else if (typeof it.str === 'string' && it.str.trim()) {
+            const [vx, vy] = vp1.convertToViewportPoint(it.transform[4], it.transform[5])
+            const fontSize = Math.abs(it.transform[3]) || Math.abs(it.transform[0]) || 12
+            const rich: RichItem = { str: it.str, vx, vy, fontSize, width: it.width ?? 0 }
+            if (currentOCGId !== null) {
+              if (!ocgTextMap.has(currentOCGId)) ocgTextMap.set(currentOCGId, [])
+              ocgTextMap.get(currentOCGId)!.push(rich)
+            } else {
+              ungroupedItems.push(rich)
+            }
+          }
+        }
       }
-      richItems.sort((a, b) => a.vy - b.vy)
 
-      // Cluster into text blocks.
-      // New block when: Y-gap > 1.8× font size  OR  font size changes significantly.
-      // Font-size change catches headline → subline transitions (large → small text).
-      const positionalBlocks: RichItem[][] = []
-      for (const item of richItems) {
-        const last = positionalBlocks[positionalBlocks.length - 1]
-        const lastItem = last?.[last.length - 1]
-        const gap = lastItem ? item.vy - lastItem.vy : Infinity
-        const yThreshold = Math.max((lastItem?.fontSize ?? 12) * 1.8, 8)
-        const fsRatio = lastItem ? item.fontSize / lastItem.fontSize : 1
-        const fontSizeChanged = fsRatio < 0.72 || fsRatio > 1.4
-        if (!last || gap > yThreshold || fontSizeChanged) positionalBlocks.push([item])
-        else last.push(item)
+      console.log('[AI Import] OCG text map keys:', Array.from(ocgTextMap.keys()))
+      console.log('[AI Import] Starred OCGs:', starredOCGs.map(g => `${g.id}: "${g.name}"`))
+
+      // Fallback: if OCG text mapping failed (no OC markers found), cluster all text
+      // into positional blocks and match to text-type starred OCGs in order.
+      const clusterItems = (items: RichItem[]): RichItem[][] => {
+        const sorted = [...items].sort((a, b) => a.vy - b.vy)
+        const blocks: RichItem[][] = []
+        for (const item of sorted) {
+          const last = blocks[blocks.length - 1]
+          const lastItem = last?.[last.length - 1]
+          const gap = lastItem ? item.vy - lastItem.vy : Infinity
+          const yThreshold = Math.max((lastItem?.fontSize ?? 12) * 1.8, 8)
+          const fsRatio = lastItem ? item.fontSize / lastItem.fontSize : 1
+          const fontSizeChanged = fsRatio < 0.72 || fsRatio > 1.4
+          if (!last || gap > yThreshold || fontSizeChanged) blocks.push([item])
+          else last.push(item)
+        }
+        return blocks
       }
 
-      console.log('[AI Import] Positional blocks:', positionalBlocks.map(b => b.map(i => i.str).join(' ')))
+      // Fallback positional blocks (all text, no OCG grouping)
+      const allTextItems: RichItem[] = [...ungroupedItems, ...Array.from(ocgTextMap.values()).flat()]
+      const fallbackBlocks = clusterItems(allTextItems)
+      console.log('[AI Import] Fallback blocks:', fallbackBlocks.map(b => b.map(i => i.str).join(' ')))
 
-      // ── Render background ─────────────────────────────────────────────────
-      // Try OCG visibility first; paint-over approach handles fallback below.
+      // ── Render full page (all layers visible) ────────────────────────────
+      const renderScale = Math.max(2, 1080 / artboard.width)
+      const renderVp = page.getViewport({ scale: renderScale })
+
+      const fullCanvas = document.createElement('canvas')
+      fullCanvas.width = Math.round(renderVp.width)
+      fullCanvas.height = Math.round(renderVp.height)
+      const fullCtx = fullCanvas.getContext('2d')!
+      await page.render({ canvas: fullCanvas, canvasContext: fullCtx, viewport: renderVp }).promise
+
+      // ── Render background (all starred layers hidden) ─────────────────────
+      const bgCanvas = document.createElement('canvas')
+      bgCanvas.width = fullCanvas.width
+      bgCanvas.height = fullCanvas.height
+      const bgCtx = bgCanvas.getContext('2d')!
       for (const { id } of starredOCGs) {
         try { ocgConfig.setVisibility(id, false) } catch { /* unsupported */ }
       }
-
-      const renderScale = Math.max(2, 1080 / artboard.width)
-      const renderVp = page.getViewport({ scale: renderScale })
-      const bgCanvas = document.createElement('canvas')
-      bgCanvas.width = Math.round(renderVp.width)
-      bgCanvas.height = Math.round(renderVp.height)
-      const bgCtx = bgCanvas.getContext('2d')!
       await page.render({
         canvas: bgCanvas, canvasContext: bgCtx, viewport: renderVp,
         optionalContentConfigPromise: Promise.resolve(ocgConfig),
       }).promise
 
-      // ── Determine field names ─────────────────────────────────────────────
-      const fieldNames: string[] = starredOCGs.length > 0
-        ? starredOCGs.map(g => g.name.replace(/^\s*\*/, '').trim())
-        : positionalBlocks.map((block, i) => {
-            const avgFs = block.reduce((s, it) => s + it.fontSize, 0) / block.length
-            if (i === 0 && avgFs >= 18) return 'Headline'
-            if (i === 1) return 'Subline'
-            return `Text ${i + 1}`
-          })
+      // Helper: erase a region from bgCanvas by sampling surrounding color
+      const paintOver = (cx: number, cy: number, cw: number, ch: number) => {
+        if (cw <= 0 || ch <= 0) return
+        const sY = cy > 10 ? cy - 8 : Math.min(cy + ch + 4, bgCanvas.height - 2)
+        const sW = Math.min(cw, bgCanvas.width - cx)
+        if (sW <= 0 || sY < 0 || sY >= bgCanvas.height) return
+        const px = bgCtx.getImageData(cx, sY, sW, 1).data
+        let r = 0, g = 0, b = 0
+        for (let p = 0; p < px.length; p += 4) { r += px[p]; g += px[p + 1]; b += px[p + 2] }
+        const n = px.length / 4
+        bgCtx.fillStyle = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`
+        bgCtx.fillRect(cx, cy, cw, ch)
+      }
 
-      // ── Helper: render page with specific OCGs visibility, return canvas ────
-      const renderWithOCGs = async (showIds: Set<string> | null): Promise<HTMLCanvasElement> => {
-        const cfg = await pdf.getOptionalContentConfig()
-        if (showIds !== null) {
-          // Hide all starred OCGs, show only ones in showIds
-          for (const { id } of starredOCGs) {
-            try { cfg.setVisibility(id, showIds.has(id)) } catch { /* unsupported */ }
+      // Helper: pixel-diff two canvases and return bounding box of differing pixels
+      const pixelDiff = (aData: Uint8ClampedArray, bData: Uint8ClampedArray, w: number, h: number, threshold = 25) => {
+        let minX = w, maxX = -1, minY = h, maxY = -1
+        for (let py = 0; py < h; py++) {
+          for (let px2 = 0; px2 < w; px2++) {
+            const idx = (py * w + px2) * 4
+            const diff = Math.abs(aData[idx] - bData[idx]) + Math.abs(aData[idx + 1] - bData[idx + 1]) + Math.abs(aData[idx + 2] - bData[idx + 2])
+            if (diff > threshold) {
+              minX = Math.min(minX, px2); maxX = Math.max(maxX, px2)
+              minY = Math.min(minY, py);  maxY = Math.max(maxY, py)
+            }
           }
         }
-        const c = document.createElement('canvas')
-        c.width = bgCanvas.width
-        c.height = bgCanvas.height
-        const ctx2 = c.getContext('2d')!
-        await page.render({ canvas: c, canvasContext: ctx2, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(cfg) }).promise
-        return c
+        return maxX >= minX && maxY >= minY ? { minX, maxX, minY, maxY } : null
       }
 
       // ── For each starred OCG: classify as text or graphic ─────────────────
-      // When no starred OCGs were found, fall back to positional text blocks.
+      // Use OCG-grouped text map (from marked content markers) to definitively
+      // know which OCG contains text. No index-matching needed.
       const extractedFields: AIEditableField[] = []
 
-      const loopCount = starredOCGs.length > 0 ? starredOCGs.length : positionalBlocks.length
+      if (starredOCGs.length === 0) {
+        // No OCGs found — fall back to positional text blocks
+        fallbackBlocks.forEach((block, i) => {
+          const sorted = [...block].sort((a, b) => a.vx - b.vx)
+          const text = sorted.map(it => it.str).join(' ').trim()
+          const topVy = Math.min(...block.map(it => it.vy - it.fontSize))
+          const bottomVy = Math.max(...block.map(it => it.vy))
+          const minVx = Math.min(...block.map(it => it.vx))
+          const maxVx = Math.min(Math.max(...block.map(it => {
+            const w = it.width > 2 ? it.width : it.str.length * it.fontSize * 0.55
+            return it.vx + w
+          })), vp1.width * 0.95)
+          const fs = block[0].fontSize
+          const pad = Math.ceil(fs * renderScale * 0.25)
+          paintOver(
+            Math.max(0, Math.floor(minVx * renderScale) - pad),
+            Math.max(0, Math.floor(topVy * renderScale) - pad),
+            Math.ceil((maxVx - minVx) * renderScale) + pad * 2,
+            Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
+          )
+          const label = i === 0 ? 'Headline' : i === 1 ? 'Subline' : `Text ${i + 1}`
+          extractedFields.push({
+            type: 'text', layerName: label, value: text, originalText: text,
+            x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
+            width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
+            height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
+            scale: 1, fontSize: fs, color: '#ffffff',
+            fontWeight: fs >= 18 ? 'bold' : 'normal', fontStyle: 'normal', textAlign: 'left',
+          })
+        })
+      } else {
+        // Use OCG text map to determine which starred OCGs have text
+        // Also try matching via fallback positional blocks for OCGs whose ID
+        // doesn't appear in the map (pdfjs version differences in OC tag format)
+        const usedFallbackBlocks = new Set<number>()
 
-      for (let i = 0; i < loopCount; i++) {
-        const ocgName = fieldNames[i] ?? `Text ${i + 1}`
-        const block = positionalBlocks[i]
+        for (const { id: ocgId, name: ocgRawName } of starredOCGs) {
+          const layerName = ocgRawName.replace(/^\s*\*/, '').trim()
 
-        if (!block) {
-          // No text found → graphic/vector layer (only possible when OCGs were found)
-          const starredOCG = starredOCGs[i]
-          if (!starredOCG) continue  // safety — shouldn't happen
+          // Check if this OCG has text in the map (direct match by ID)
+          let ocgItems = ocgTextMap.get(ocgId) ?? null
 
-          console.log(`[AI Import] Layer "${ocgName}" has no text block → treating as graphic`)
+          // If not found, try matching by looking at all map keys for partial match
+          if (!ocgItems) {
+            for (const [key, items] of Array.from(ocgTextMap.entries())) {
+              if (key.includes(ocgId) || ocgId.includes(key)) { ocgItems = items; break }
+            }
+          }
 
-          let imageUrl: string | undefined
-          let gx = 0.05, gy = 0.05 + i * 0.15, gw = 0.3, gh = 0.3
-
-          try {
-            const onlyThis = await renderWithOCGs(new Set([starredOCG.id]))
-            const onlyCtx = onlyThis.getContext('2d')!
-            const full = onlyCtx.getImageData(0, 0, onlyThis.width, onlyThis.height)
-
-            // Pixel-scan: find bounding box of pixels that are visually different from bgCanvas
-            const bgFull = bgCtx.getImageData(0, 0, bgCanvas.width, bgCanvas.height)
-            let minX = onlyThis.width, maxX = 0, minY = onlyThis.height, maxY = 0
-            for (let py = 0; py < onlyThis.height; py++) {
-              for (let px2 = 0; px2 < onlyThis.width; px2++) {
-                const idx = (py * onlyThis.width + px2) * 4
-                const dr = Math.abs(full.data[idx] - bgFull.data[idx])
-                const dg = Math.abs(full.data[idx + 1] - bgFull.data[idx + 1])
-                const db = Math.abs(full.data[idx + 2] - bgFull.data[idx + 2])
-                if (dr + dg + db > 30) {
-                  minX = Math.min(minX, px2)
-                  maxX = Math.max(maxX, px2)
-                  minY = Math.min(minY, py)
-                  maxY = Math.max(maxY, py)
-                }
+          if (ocgItems && ocgItems.length > 0) {
+            // ── Text field ───────────────────────────────────────────────
+            const cluster = clusterItems(ocgItems)
+            const block = cluster.flat()
+            const sorted = [...block].sort((a, b) => a.vx - b.vx)
+            const text = sorted.map(it => it.str).join(' ').trim()
+            const topVy = Math.min(...block.map(it => it.vy - it.fontSize))
+            const bottomVy = Math.max(...block.map(it => it.vy))
+            const minVx = Math.min(...block.map(it => it.vx))
+            const maxVx = Math.min(Math.max(...block.map(it => {
+              const w = it.width > 2 ? it.width : it.str.length * it.fontSize * 0.55
+              return it.vx + w
+            })), vp1.width * 0.95)
+            const fs = block[0].fontSize
+            const pad = Math.ceil(fs * renderScale * 0.25)
+            paintOver(
+              Math.max(0, Math.floor(minVx * renderScale) - pad),
+              Math.max(0, Math.floor(topVy * renderScale) - pad),
+              Math.ceil((maxVx - minVx) * renderScale) + pad * 2,
+              Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
+            )
+            extractedFields.push({
+              type: 'text', layerName, value: text, originalText: text,
+              x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
+              width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
+              height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
+              scale: 1, fontSize: fs, color: '#ffffff',
+              fontWeight: fs >= 18 ? 'bold' : 'normal', fontStyle: 'normal', textAlign: 'left',
+            })
+          } else {
+            // OCG text map had no match — try fallback positional blocks
+            // by finding an unused block (for backward compatibility)
+            let fallbackBlock: RichItem[] | null = null
+            for (let fi = 0; fi < fallbackBlocks.length; fi++) {
+              if (!usedFallbackBlocks.has(fi)) {
+                fallbackBlock = fallbackBlocks[fi]
+                usedFallbackBlocks.add(fi)
+                break
               }
             }
 
-            if (maxX > minX && maxY > minY) {
-              // Crop just the graphic from the full render
-              const pad2 = 4
-              const cropX = Math.max(0, minX - pad2)
-              const cropY = Math.max(0, minY - pad2)
-              const cropW = Math.min(onlyThis.width - cropX, maxX - minX + pad2 * 2)
-              const cropH = Math.min(onlyThis.height - cropY, maxY - minY + pad2 * 2)
+            if (fallbackBlock) {
+              // ── Text field (fallback matching) ────────────────────────
+              const block = fallbackBlock
+              const sorted = [...block].sort((a, b) => a.vx - b.vx)
+              const text = sorted.map(it => it.str).join(' ').trim()
+              const topVy = Math.min(...block.map(it => it.vy - it.fontSize))
+              const bottomVy = Math.max(...block.map(it => it.vy))
+              const minVx = Math.min(...block.map(it => it.vx))
+              const maxVx = Math.min(Math.max(...block.map(it => {
+                const w = it.width > 2 ? it.width : it.str.length * it.fontSize * 0.55
+                return it.vx + w
+              })), vp1.width * 0.95)
+              const fs = block[0].fontSize
+              const pad = Math.ceil(fs * renderScale * 0.25)
+              paintOver(
+                Math.max(0, Math.floor(minVx * renderScale) - pad),
+                Math.max(0, Math.floor(topVy * renderScale) - pad),
+                Math.ceil((maxVx - minVx) * renderScale) + pad * 2,
+                Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
+              )
+              extractedFields.push({
+                type: 'text', layerName, value: text, originalText: text,
+                x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
+                width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
+                height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
+                scale: 1, fontSize: fs, color: '#ffffff',
+                fontWeight: fs >= 18 ? 'bold' : 'normal', fontStyle: 'normal', textAlign: 'left',
+              })
+            } else {
+              // ── Graphic field: pixel-diff full vs (full without this layer) ──
+              console.log(`[AI Import] Layer "${layerName}" has no text → graphic extraction`)
 
-              const cropCanvas = document.createElement('canvas')
-              cropCanvas.width = cropW
-              cropCanvas.height = cropH
-              cropCanvas.getContext('2d')!.drawImage(onlyThis, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
-              imageUrl = cropCanvas.toDataURL('image/png')
+              let imageUrl: string | undefined
+              let gx = 0.05, gy = 0.3, gw = 0.4, gh = 0.4
 
-              gx = minX / bgCanvas.width / renderScale * renderScale  // normalize to artboard
-              gy = minY / bgCanvas.height / renderScale * renderScale
-              gw = cropW / bgCanvas.width
-              gh = cropH / bgCanvas.height
-              // More precise: normalize by artboard dimensions
-              gx = cropX / bgCanvas.width
-              gy = cropY / bgCanvas.height
-              gw = cropW / bgCanvas.width
-              gh = cropH / bgCanvas.height
+              try {
+                // Render page without this specific layer
+                const withoutCfg = await pdf.getOptionalContentConfig()
+                try { withoutCfg.setVisibility(ocgId, false) } catch { /* unsupported */ }
+                const withoutCanvas = document.createElement('canvas')
+                withoutCanvas.width = fullCanvas.width
+                withoutCanvas.height = fullCanvas.height
+                const withoutCtx = withoutCanvas.getContext('2d')!
+                await page.render({ canvas: withoutCanvas, canvasContext: withoutCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
 
-              // Erase from background
-              bgCtx.clearRect(cropX, cropY, cropW, cropH)
-              const sampleY2 = cropY > 10 ? cropY - 8 : Math.min(cropY + cropH + 4, bgCanvas.height - 2)
-              const px3 = bgCtx.getImageData(cropX, sampleY2, Math.min(cropW, bgCanvas.width - cropX), 1).data
-              let r2 = 0, g2 = 0, b2 = 0
-              for (let p = 0; p < px3.length; p += 4) { r2 += px3[p]; g2 += px3[p + 1]; b2 += px3[p + 2] }
-              const n2 = px3.length / 4
-              bgCtx.fillStyle = `rgb(${Math.round(r2 / n2)},${Math.round(g2 / n2)},${Math.round(b2 / n2)})`
-              bgCtx.fillRect(cropX, cropY, cropW, cropH)
+                const fullData = fullCtx.getImageData(0, 0, fullCanvas.width, fullCanvas.height).data
+                const withoutData = withoutCtx.getImageData(0, 0, withoutCanvas.width, withoutCanvas.height).data
+                const bbox = pixelDiff(fullData, withoutData, fullCanvas.width, fullCanvas.height)
+                console.log(`[AI Import] Graphic "${layerName}" pixel diff bbox:`, bbox)
+
+                if (bbox) {
+                  const pad2 = 8
+                  const cropX = Math.max(0, bbox.minX - pad2)
+                  const cropY = Math.max(0, bbox.minY - pad2)
+                  const cropW = Math.min(fullCanvas.width - cropX, bbox.maxX - bbox.minX + pad2 * 2)
+                  const cropH = Math.min(fullCanvas.height - cropY, bbox.maxY - bbox.minY + pad2 * 2)
+
+                  // Crop the graphic from the full render
+                  const cropCanvas = document.createElement('canvas')
+                  cropCanvas.width = cropW
+                  cropCanvas.height = cropH
+                  cropCanvas.getContext('2d')!.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
+                  imageUrl = cropCanvas.toDataURL('image/png')
+
+                  gx = cropX / fullCanvas.width
+                  gy = cropY / fullCanvas.height
+                  gw = cropW / fullCanvas.width
+                  gh = cropH / fullCanvas.height
+
+                  // Erase the graphic region from bgCanvas
+                  paintOver(cropX, cropY, cropW, cropH)
+                }
+              } catch (e) {
+                console.warn('[AI Import] Graphic extraction failed:', e)
+              }
+
+              extractedFields.push({
+                type: 'graphic', layerName, value: '', originalText: '',
+                imageUrl, scale: 1,
+                x: gx, y: gy, width: gw, height: gh,
+                fontSize: 0, color: '#ffffff', fontWeight: 'normal', fontStyle: 'normal', textAlign: 'left',
+              })
             }
-          } catch (e) {
-            console.warn('[AI Import] Graphic extraction failed:', e)
-          }
-
-          extractedFields.push({
-            type: 'graphic',
-            layerName: ocgName,
-            value: '', originalText: '',
-            imageUrl,
-            scale: 1,
-            x: gx, y: gy, width: gw, height: gh,
-            fontSize: 0, color: '#ffffff', fontWeight: 'normal', fontStyle: 'normal', textAlign: 'left',
-          })
-          continue
-        }
-
-        // ── Text block matched → text field ───────────────────────────────
-        const sorted = [...block].sort((a, b) => a.vx - b.vx)
-        const text = sorted.map(it => it.str).join(' ').trim()
-
-        const topVy = Math.min(...block.map(it => it.vy - it.fontSize))
-        const bottomVy = Math.max(...block.map(it => it.vy))
-        const minVx = Math.min(...block.map(it => it.vx))
-        const rawMaxVx = Math.max(...block.map(it => {
-          const w = it.width > 2 ? it.width : it.str.length * it.fontSize * 0.55
-          return it.vx + w
-        }))
-        const maxVx = Math.min(rawMaxVx, vp1.width * 0.95)
-        const fs = block[0].fontSize
-
-        // Paint-over: erase original text from background canvas
-        const pad = Math.ceil(fs * renderScale * 0.25)
-        const cx = Math.max(0, Math.floor(minVx * renderScale) - pad)
-        const cy = Math.max(0, Math.floor(topVy * renderScale) - pad)
-        const cw = Math.min(bgCanvas.width - cx, Math.ceil((maxVx - minVx) * renderScale) + pad * 2)
-        const ch = Math.min(bgCanvas.height - cy, Math.ceil((bottomVy - topVy) * renderScale) + pad * 2)
-
-        if (cw > 0 && ch > 0) {
-          const sampleY = cy > 10 ? cy - 8 : Math.min(cy + ch + 4, bgCanvas.height - 2)
-          const sampleX = cx
-          const sampleW = Math.min(cw, bgCanvas.width - sampleX)
-          if (sampleW > 0 && sampleY >= 0 && sampleY < bgCanvas.height) {
-            const px = bgCtx.getImageData(sampleX, sampleY, sampleW, 1).data
-            let r = 0, g = 0, b = 0
-            for (let p = 0; p < px.length; p += 4) { r += px[p]; g += px[p + 1]; b += px[p + 2] }
-            const n = px.length / 4
-            bgCtx.fillStyle = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`
-            bgCtx.fillRect(cx, cy, cw, ch)
           }
         }
-
-        extractedFields.push({
-          type: 'text',
-          layerName: ocgName,
-          value: text,
-          originalText: text,
-          x: Math.max(0, minVx / vp1.width),
-          y: Math.max(0, topVy / vp1.height),
-          width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
-          height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
-          scale: 1,
-          fontSize: fs,
-          color: '#ffffff',
-          fontWeight: fs >= 18 ? 'bold' : 'normal',
-          fontStyle: 'normal',
-          textAlign: 'left',
-        })
       }
 
       setBackgroundUrl(bgCanvas.toDataURL('image/png'))
