@@ -46,6 +46,110 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   )
 }
 
+import type { AIImportData, AIEditableField } from '@/types/posting'
+
+function AIFieldItem({
+  field,
+  index,
+  aiImport,
+  updateConfig,
+}: {
+  field: AIEditableField
+  index: number
+  aiImport: AIImportData
+  updateConfig: (updates: Partial<PostingConfig>) => void
+}) {
+  const [open, setOpen] = useState(true)
+
+  const updateField = (updates: Partial<AIEditableField>) => {
+    const updated = aiImport.editableFields.map((f, fi) =>
+      fi === index ? { ...f, ...updates } : f
+    )
+    updateConfig({ aiImport: { ...aiImport, editableFields: updated } })
+  }
+
+  return (
+    <div className="border-t border-white/10 first:border-t-0">
+      {/* Header row — After Effects style */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-4 py-2 hover:bg-white/5 transition-colors text-left"
+      >
+        <ChevronDown
+          className={`w-3 h-3 text-gray-500 shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}
+        />
+        <span className="font-mono text-xs text-cyan-400 font-semibold tracking-wide">*{field.layerName}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-3 space-y-2">
+          <textarea
+            value={field.value}
+            onChange={(e) => updateField({ value: e.target.value })}
+            className="w-full px-3 py-2 bg-black/30 border border-white/10 text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
+            rows={field.value.includes('\n') ? 3 : 2}
+          />
+          {/* Compact property row */}
+          <div className="flex items-center gap-2 text-xs text-gray-400">
+            <span className="w-3 text-right shrink-0">X</span>
+            <input
+              type="number" min={0} max={100} step={0.1}
+              value={Math.round(field.x * 1000) / 10}
+              onChange={(e) => updateField({ x: parseFloat(e.target.value) / 100 })}
+              className="w-16 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
+            />
+            <span className="w-3 text-right shrink-0">Y</span>
+            <input
+              type="number" min={0} max={100} step={0.1}
+              value={Math.round(field.y * 1000) / 10}
+              onChange={(e) => updateField({ y: parseFloat(e.target.value) / 100 })}
+              className="w-16 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
+            />
+            <span className="shrink-0">px</span>
+            <input
+              type="number" min={1} step={1}
+              value={Math.round(field.fontSize)}
+              onChange={(e) => updateField({ fontSize: parseFloat(e.target.value) })}
+              className="w-14 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
+            />
+            <input
+              type="color"
+              value={field.color.startsWith('#') ? field.color : '#ffffff'}
+              onChange={(e) => updateField({ color: e.target.value })}
+              className="w-6 h-6 rounded cursor-pointer border border-white/20 bg-transparent shrink-0"
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AIFieldList({
+  fields,
+  aiImport,
+  updateConfig,
+}: {
+  fields: AIEditableField[]
+  aiImport: AIImportData
+  updateConfig: (updates: Partial<PostingConfig>) => void
+}) {
+  if (fields.length === 0) {
+    return (
+      <p className="px-6 pb-4 text-sm text-gray-400">
+        Keine editierbaren Felder (keine Layer mit * Präfix gefunden).
+      </p>
+    )
+  }
+  return (
+    <div className="pb-2">
+      {fields.map((field, i) => (
+        <AIFieldItem key={i} field={field} index={i} aiImport={aiImport} updateConfig={updateConfig} />
+      ))}
+    </div>
+  )
+}
+
 export function CreatorSidebar({ config, updateConfig }: CreatorSidebarProps) {
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
 
@@ -84,66 +188,8 @@ export function CreatorSidebar({ config, updateConfig }: CreatorSidebarProps) {
                 Entfernen
               </button>
             </div>
-            <div className="px-6 pb-6 space-y-5">
-              {config.aiImport.editableFields.length === 0 ? (
-                <p className="text-sm text-gray-400">Keine editierbaren Felder (keine Layer mit * Präfix gefunden).</p>
-              ) : (
-                config.aiImport.editableFields.map((field, i) => {
-                  const updateField = (updates: Partial<typeof field>) => {
-                    const updated = config.aiImport!.editableFields.map((f, fi) =>
-                      fi === i ? { ...f, ...updates } : f
-                    )
-                    updateConfig({ aiImport: { ...config.aiImport!, editableFields: updated } })
-                  }
-                  return (
-                    <div key={i} className="space-y-2">
-                      <Label className="text-gray-300 flex items-center gap-2">
-                        <span className="font-mono text-xs bg-white/10 px-2 py-0.5 rounded text-cyan-400">*{field.layerName}</span>
-                      </Label>
-                      <textarea
-                        value={field.value}
-                        onChange={(e) => updateField({ value: e.target.value })}
-                        className="w-full px-3 py-2 bg-white/5 border border-white/20 text-white rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none"
-                        rows={field.value.includes('\n') ? 3 : 2}
-                      />
-                      {/* Compact controls row */}
-                      <div className="flex items-center gap-1.5 text-xs">
-                        <span className="text-gray-500 shrink-0">X</span>
-                        <input
-                          type="number"
-                          min={0} max={100} step={0.1}
-                          value={Math.round(field.x * 1000) / 10}
-                          onChange={(e) => updateField({ x: parseFloat(e.target.value) / 100 })}
-                          className="w-14 px-1.5 py-1 bg-white/5 border border-white/20 text-white rounded text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                        />
-                        <span className="text-gray-500 shrink-0">Y</span>
-                        <input
-                          type="number"
-                          min={0} max={100} step={0.1}
-                          value={Math.round(field.y * 1000) / 10}
-                          onChange={(e) => updateField({ y: parseFloat(e.target.value) / 100 })}
-                          className="w-14 px-1.5 py-1 bg-white/5 border border-white/20 text-white rounded text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                        />
-                        <span className="text-gray-500 shrink-0">px</span>
-                        <input
-                          type="number"
-                          min={1} step={1}
-                          value={Math.round(field.fontSize)}
-                          onChange={(e) => updateField({ fontSize: parseFloat(e.target.value) })}
-                          className="w-14 px-1.5 py-1 bg-white/5 border border-white/20 text-white rounded text-xs focus:outline-none focus:ring-1 focus:ring-cyan-500"
-                        />
-                        <input
-                          type="color"
-                          value={field.color.startsWith('#') ? field.color : '#ffffff'}
-                          onChange={(e) => updateField({ color: e.target.value })}
-                          className="w-6 h-6 rounded cursor-pointer bg-transparent border border-white/20 shrink-0"
-                        />
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
+            <AIFieldList fields={config.aiImport.editableFields} aiImport={config.aiImport} updateConfig={updateConfig} />
+
           </div>
         )}
 
