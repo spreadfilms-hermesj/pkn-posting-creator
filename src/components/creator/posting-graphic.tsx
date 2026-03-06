@@ -63,15 +63,61 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
           />
           {editableFields.map((field, i) => {
             const isSelected = !forExport && selectedFieldIndex === i
+            const left = field.x * artboardWidth
+            const top = field.y * artboardHeight
+            const w = field.width * artboardWidth
+            const h = field.height * artboardHeight
+            const sharedStyle: React.CSSProperties = {
+              position: 'absolute',
+              left,
+              top,
+              cursor: forExport ? 'default' : 'pointer',
+              outline: isSelected ? '2px solid #22d3ee' : 'none',
+              outlineOffset: 6,
+              borderRadius: 2,
+            }
+
+            if (field.type === 'graphic') {
+              return (
+                <div
+                  key={i}
+                  onClick={forExport ? undefined : () => onSelectField?.(i)}
+                  style={{
+                    ...sharedStyle,
+                    width: w,
+                    height: h,
+                    transformOrigin: 'top left',
+                    transform: field.scale !== 1 ? `scale(${field.scale})` : undefined,
+                  }}
+                >
+                  {field.imageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={field.imageUrl} alt={field.layerName} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} />
+                  ) : (
+                    // Placeholder when graphic extraction failed
+                    !forExport && (
+                      <div style={{
+                        width: '100%', height: '100%', minWidth: 60, minHeight: 40,
+                        border: '1px dashed rgba(34,211,238,0.4)',
+                        borderRadius: 4,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: 'rgba(34,211,238,0.6)', fontSize: 11,
+                      }}>
+                        {field.layerName}
+                      </div>
+                    )
+                  )}
+                </div>
+              )
+            }
+
             return (
               <div
                 key={i}
                 onClick={forExport ? undefined : () => onSelectField?.(i)}
                 style={{
-                  position: 'absolute',
-                  left: field.x * artboardWidth,
-                  top: field.y * artboardHeight,
-                  width: field.width * artboardWidth,
+                  ...sharedStyle,
+                  width: w,
                   fontSize: field.fontSize,
                   color: field.color,
                   fontWeight: field.fontWeight,
@@ -80,10 +126,6 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
                   lineHeight: 1.25,
                   whiteSpace: 'pre-wrap',
                   wordBreak: 'break-word',
-                  cursor: forExport ? 'default' : 'pointer',
-                  outline: isSelected ? '2px solid #22d3ee' : 'none',
-                  outlineOffset: 6,
-                  borderRadius: 2,
                 }}
               >
                 {field.value}

@@ -90,17 +90,25 @@ function AIFieldItem({
           className={`w-3 h-3 shrink-0 transition-transform ${open ? '' : '-rotate-90'} ${isSelected ? 'text-cyan-400' : 'text-gray-500'}`}
         />
         <span className={`font-mono text-xs font-semibold tracking-wide ${isSelected ? 'text-cyan-300' : 'text-cyan-400'}`}>*{field.layerName}</span>
+        {field.type === 'graphic' && <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">Grafik</span>}
         {isSelected && <span className="ml-auto text-[10px] text-cyan-500 font-normal">aktiv</span>}
       </button>
 
       {open && (
         <div className="px-4 pb-3 space-y-2">
-          <textarea
-            value={field.value}
-            onChange={(e) => updateField({ value: e.target.value })}
-            className="w-full px-3 py-2 bg-black/30 border border-white/10 text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
-            rows={field.value.includes('\n') ? 3 : 2}
-          />
+          {field.type !== 'graphic' && (
+            <textarea
+              value={field.value}
+              onChange={(e) => updateField({ value: e.target.value })}
+              className="w-full px-3 py-2 bg-black/30 border border-white/10 text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
+              rows={field.value.includes('\n') ? 3 : 2}
+            />
+          )}
+          {field.type === 'graphic' && !field.imageUrl && (
+            <p className="text-xs text-yellow-400/80 bg-yellow-500/10 rounded px-2 py-1.5">
+              Grafik konnte nicht isoliert werden — Position & Skalierung trotzdem einstellbar.
+            </p>
+          )}
           {/* Compact property row */}
           <div className="flex items-center gap-2 text-xs text-gray-400">
             <span className="w-3 text-right shrink-0">X</span>
@@ -117,19 +125,33 @@ function AIFieldItem({
               onChange={(e) => updateField({ y: parseFloat(e.target.value) / 100 })}
               className="w-16 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
             />
-            <span className="shrink-0">px</span>
-            <input
-              type="number" min={1} step={1}
-              value={Math.round(field.fontSize)}
-              onChange={(e) => updateField({ fontSize: parseFloat(e.target.value) })}
-              className="w-14 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
-            />
-            <input
-              type="color"
-              value={field.color.startsWith('#') ? field.color : '#ffffff'}
-              onChange={(e) => updateField({ color: e.target.value })}
-              className="w-6 h-6 rounded cursor-pointer border border-white/20 bg-transparent shrink-0"
-            />
+            {field.type === 'graphic' ? (
+              <>
+                <span className="shrink-0">×</span>
+                <input
+                  type="number" min={0.1} max={5} step={0.05}
+                  value={Math.round((field.scale ?? 1) * 100) / 100}
+                  onChange={(e) => updateField({ scale: parseFloat(e.target.value) })}
+                  className="w-14 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
+                />
+              </>
+            ) : (
+              <>
+                <span className="shrink-0">px</span>
+                <input
+                  type="number" min={1} step={1}
+                  value={Math.round(field.fontSize)}
+                  onChange={(e) => updateField({ fontSize: parseFloat(e.target.value) })}
+                  className="w-14 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
+                />
+                <input
+                  type="color"
+                  value={field.color.startsWith('#') ? field.color : '#ffffff'}
+                  onChange={(e) => updateField({ color: e.target.value })}
+                  className="w-6 h-6 rounded cursor-pointer border border-white/20 bg-transparent shrink-0"
+                />
+              </>
+            )}
           </div>
         </div>
       )}

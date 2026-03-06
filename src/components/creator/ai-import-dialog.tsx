@@ -183,22 +183,117 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             return `Text ${i + 1}`
           })
 
-      // We always create one field per starred-layer name.
-      // If fewer positional blocks exist than names, later fields get empty text.
+      // ── Helper: render page with specific OCGs visibility, return canvas ────
+      const renderWithOCGs = async (showIds: Set<string> | null): Promise<HTMLCanvasElement> => {
+        const cfg = await pdf.getOptionalContentConfig()
+        if (showIds !== null) {
+          // Hide all starred OCGs, show only ones in showIds
+          for (const { id } of starredOCGs) {
+            try { cfg.setVisibility(id, showIds.has(id)) } catch { /* unsupported */ }
+          }
+        }
+        const c = document.createElement('canvas')
+        c.width = bgCanvas.width
+        c.height = bgCanvas.height
+        const ctx2 = c.getContext('2d')!
+        await page.render({ canvas: c, canvasContext: ctx2, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(cfg) }).promise
+        return c
+      }
+
+      // ── For each starred OCG: classify as text or graphic ─────────────────
+      // When no starred OCGs were found, fall back to positional text blocks.
       const extractedFields: AIEditableField[] = []
 
-      for (let i = 0; i < fieldNames.length; i++) {
+      const loopCount = starredOCGs.length > 0 ? starredOCGs.length : positionalBlocks.length
+
+      for (let i = 0; i < loopCount; i++) {
+        const ocgName = fieldNames[i] ?? `Text ${i + 1}`
         const block = positionalBlocks[i]
+
         if (!block) {
-          // Starred layer exists in AI but no text block found for it → placeholder
+          // No text found → graphic/vector layer (only possible when OCGs were found)
+          const starredOCG = starredOCGs[i]
+          if (!starredOCG) continue  // safety — shouldn't happen
+
+          console.log(`[AI Import] Layer "${ocgName}" has no text block → treating as graphic`)
+
+          let imageUrl: string | undefined
+          let gx = 0.05, gy = 0.05 + i * 0.15, gw = 0.3, gh = 0.3
+
+          try {
+            const onlyThis = await renderWithOCGs(new Set([starredOCG.id]))
+            const onlyCtx = onlyThis.getContext('2d')!
+            const full = onlyCtx.getImageData(0, 0, onlyThis.width, onlyThis.height)
+
+            // Pixel-scan: find bounding box of pixels that are visually different from bgCanvas
+            const bgFull = bgCtx.getImageData(0, 0, bgCanvas.width, bgCanvas.height)
+            let minX = onlyThis.width, maxX = 0, minY = onlyThis.height, maxY = 0
+            for (let py = 0; py < onlyThis.height; py++) {
+              for (let px2 = 0; px2 < onlyThis.width; px2++) {
+                const idx = (py * onlyThis.width + px2) * 4
+                const dr = Math.abs(full.data[idx] - bgFull.data[idx])
+                const dg = Math.abs(full.data[idx + 1] - bgFull.data[idx + 1])
+                const db = Math.abs(full.data[idx + 2] - bgFull.data[idx + 2])
+                if (dr + dg + db > 30) {
+                  minX = Math.min(minX, px2)
+                  maxX = Math.max(maxX, px2)
+                  minY = Math.min(minY, py)
+                  maxY = Math.max(maxY, py)
+                }
+              }
+            }
+
+            if (maxX > minX && maxY > minY) {
+              // Crop just the graphic from the full render
+              const pad2 = 4
+              const cropX = Math.max(0, minX - pad2)
+              const cropY = Math.max(0, minY - pad2)
+              const cropW = Math.min(onlyThis.width - cropX, maxX - minX + pad2 * 2)
+              const cropH = Math.min(onlyThis.height - cropY, maxY - minY + pad2 * 2)
+
+              const cropCanvas = document.createElement('canvas')
+              cropCanvas.width = cropW
+              cropCanvas.height = cropH
+              cropCanvas.getContext('2d')!.drawImage(onlyThis, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
+              imageUrl = cropCanvas.toDataURL('image/png')
+
+              gx = minX / bgCanvas.width / renderScale * renderScale  // normalize to artboard
+              gy = minY / bgCanvas.height / renderScale * renderScale
+              gw = cropW / bgCanvas.width
+              gh = cropH / bgCanvas.height
+              // More precise: normalize by artboard dimensions
+              gx = cropX / bgCanvas.width
+              gy = cropY / bgCanvas.height
+              gw = cropW / bgCanvas.width
+              gh = cropH / bgCanvas.height
+
+              // Erase from background
+              bgCtx.clearRect(cropX, cropY, cropW, cropH)
+              const sampleY2 = cropY > 10 ? cropY - 8 : Math.min(cropY + cropH + 4, bgCanvas.height - 2)
+              const px3 = bgCtx.getImageData(cropX, sampleY2, Math.min(cropW, bgCanvas.width - cropX), 1).data
+              let r2 = 0, g2 = 0, b2 = 0
+              for (let p = 0; p < px3.length; p += 4) { r2 += px3[p]; g2 += px3[p + 1]; b2 += px3[p + 2] }
+              const n2 = px3.length / 4
+              bgCtx.fillStyle = `rgb(${Math.round(r2 / n2)},${Math.round(g2 / n2)},${Math.round(b2 / n2)})`
+              bgCtx.fillRect(cropX, cropY, cropW, cropH)
+            }
+          } catch (e) {
+            console.warn('[AI Import] Graphic extraction failed:', e)
+          }
+
           extractedFields.push({
-            layerName: fieldNames[i], value: '', originalText: '',
-            x: 0.05, y: 0.05 + i * 0.2, width: 0.6,
-            fontSize: 24, color: '#ffffff', fontWeight: 'normal', fontStyle: 'normal', textAlign: 'left',
+            type: 'graphic',
+            layerName: ocgName,
+            value: '', originalText: '',
+            imageUrl,
+            scale: 1,
+            x: gx, y: gy, width: gw, height: gh,
+            fontSize: 0, color: '#ffffff', fontWeight: 'normal', fontStyle: 'normal', textAlign: 'left',
           })
           continue
         }
 
+        // ── Text block matched → text field ───────────────────────────────
         const sorted = [...block].sort((a, b) => a.vx - b.vx)
         const text = sorted.map(it => it.str).join(' ').trim()
 
@@ -212,9 +307,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         const maxVx = Math.min(rawMaxVx, vp1.width * 0.95)
         const fs = block[0].fontSize
 
-        // ── Paint-over: erase original text from background canvas ──────────
-        // Samples the color just OUTSIDE the text bounding box and fills over it,
-        // so the editable overlay doesn't produce a double-text effect.
+        // Paint-over: erase original text from background canvas
         const pad = Math.ceil(fs * renderScale * 0.25)
         const cx = Math.max(0, Math.floor(minVx * renderScale) - pad)
         const cy = Math.max(0, Math.floor(topVy * renderScale) - pad)
@@ -222,7 +315,6 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         const ch = Math.min(bgCanvas.height - cy, Math.ceil((bottomVy - topVy) * renderScale) + pad * 2)
 
         if (cw > 0 && ch > 0) {
-          // Sample a horizontal strip ABOVE the box (or below if at top)
           const sampleY = cy > 10 ? cy - 8 : Math.min(cy + ch + 4, bgCanvas.height - 2)
           const sampleX = cx
           const sampleW = Math.min(cw, bgCanvas.width - sampleX)
@@ -237,12 +329,15 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
 
         extractedFields.push({
-          layerName: fieldNames[i],
+          type: 'text',
+          layerName: ocgName,
           value: text,
           originalText: text,
           x: Math.max(0, minVx / vp1.width),
           y: Math.max(0, topVy / vp1.height),
           width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
+          height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
+          scale: 1,
           fontSize: fs,
           color: '#ffffff',
           fontWeight: fs >= 18 ? 'bold' : 'normal',

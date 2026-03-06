@@ -1,15 +1,22 @@
 export interface AIEditableField {
+  type: 'text' | 'graphic'
   layerName: string      // e.g. "Headline" (the * is stripped)
-  value: string          // current editable text
-  originalText: string   // as extracted from AI
-  x: number              // normalized 0–1 on artboard
-  y: number
-  width: number
+  // text fields
+  value: string
+  originalText: string
   fontSize: number       // in artboard native px
   color: string
   fontWeight: 'normal' | 'bold'
   fontStyle: 'normal' | 'italic'
   textAlign: 'left' | 'center' | 'right'
+  // graphic fields
+  imageUrl?: string      // extracted graphic as PNG data URL
+  scale: number          // scale multiplier (1 = original size)
+  // shared positioning (normalized 0–1)
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 export interface AIImportData {
