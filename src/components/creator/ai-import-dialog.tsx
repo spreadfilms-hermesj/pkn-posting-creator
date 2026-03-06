@@ -117,31 +117,65 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
       }
 
-      // Extract text per OCG using marked content
+      // ── Step A: Try OCG-ID-based text mapping (stack-based for nested layers) ──
       const textContent = await page.getTextContent({ includeMarkedContent: true })
-      const textByOCGId: Record<string, { texts: string[]; items: { transform: number[]; str: string; hasEOL: boolean }[] }> = {}
-      let currentId: string | null = null
+
+      // Stack handles nested BDC/EMC correctly
+      const idStack: string[] = []
+      const textByOCGId: Record<string, { texts: string[]; items: { transform: number[]; str: string; width?: number }[] }> = {}
 
       for (const item of textContent.items) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const mc = item as any
-        if (mc.type === 'beginMarkedContentProps' && mc.id) {
-          currentId = mc.id
+        if (mc.type === 'beginMarkedContent' || mc.type === 'beginMarkedContentProps') {
+          if (mc.id) idStack.push(mc.id)
         } else if (mc.type === 'endMarkedContent') {
-          currentId = null
-        } else if (typeof mc.str === 'string' && currentId) {
-          if (!textByOCGId[currentId]) textByOCGId[currentId] = { texts: [], items: [] }
-          if (mc.str.trim()) textByOCGId[currentId].texts.push(mc.str)
-          textByOCGId[currentId].items.push(mc)
+          idStack.pop()
+        } else if (typeof mc.str === 'string' && mc.str.trim()) {
+          // Assign to the innermost starred OCG on the stack
+          const starredId = [...idStack].reverse().find(id => starredOCGs.some(g => g.id === id))
+          if (starredId) {
+            if (!textByOCGId[starredId]) textByOCGId[starredId] = { texts: [], items: [] }
+            textByOCGId[starredId].texts.push(mc.str)
+            textByOCGId[starredId].items.push(mc)
+          }
         }
       }
 
-      // Hide starred OCGs for the background render
+      // ── Step B: Positional block grouping (reliable fallback) ──
+      // Group all text items into blocks separated by significant Y gaps.
+      // This works regardless of OCG ID matching.
+      type RichItem = { str: string; vx: number; vy: number; fontSize: number; width: number; transform: number[] }
+      const richItems: RichItem[] = []
+      for (const item of textContent.items) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const it = item as any
+        if (typeof it.str !== 'string' || !it.str.trim()) continue
+        const [vx, vy] = vp1.convertToViewportPoint(it.transform[4], it.transform[5])
+        const fontSize = Math.abs(it.transform[3]) || Math.abs(it.transform[0]) || 12
+        richItems.push({ str: it.str, vx, vy, fontSize, width: it.width ?? 0, transform: it.transform })
+      }
+      richItems.sort((a, b) => a.vy - b.vy)
+
+      // Cluster into blocks: a new block starts when the Y gap > 1.5× the avg font size
+      const positionalBlocks: RichItem[][] = []
+      for (const item of richItems) {
+        const last = positionalBlocks[positionalBlocks.length - 1]
+        const lastItem = last?.[last.length - 1]
+        const gap = lastItem ? item.vy - lastItem.vy : Infinity
+        const threshold = Math.max((lastItem?.fontSize ?? 12) * 1.8, 8)
+        if (!last || gap > threshold) {
+          positionalBlocks.push([item])
+        } else {
+          last.push(item)
+        }
+      }
+
+      // ── Step C: Hide starred OCGs and render background ──
       for (const { id } of starredOCGs) {
         try { ocgConfig.setVisibility(id, false) } catch { /* unsupported */ }
       }
 
-      // Render background at 2× for crispness
       const renderScale = Math.max(2, 1080 / artboard.width)
       const renderVp = page.getViewport({ scale: renderScale })
       const bgCanvas = document.createElement('canvas')
@@ -157,97 +191,68 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const bgUrl = bgCanvas.toDataURL('image/png')
       setBackgroundUrl(bgUrl)
 
-      // Build AIEditableField list
+      // ── Step D: Build editable fields ──
+      // Prefer OCG-ID mapping; fall back to positional blocks per starred layer.
       const extractedFields: AIEditableField[] = []
 
-      for (const { id, name } of starredOCGs) {
-        const data = textByOCGId[id]
-        const extractedText = data?.texts.join(' ').trim() ?? ''
+      // Debug: log what was found (visible in browser devtools)
+      console.log('[AI Import] Starred OCGs:', starredOCGs)
+      console.log('[AI Import] Text by OCG ID:', Object.fromEntries(Object.entries(textByOCGId).map(([k, v]) => [k, v.texts])))
+      console.log('[AI Import] Positional blocks:', positionalBlocks.map(b => b.map(i => i.str).join(' ')))
 
-        let x = 0.05
-        let y = 0.05 + extractedFields.length * 0.18
-        let width = 0.6
-        let fontSize = 36
-        let fontWeight: 'normal' | 'bold' = 'bold'
+      starredOCGs.forEach(({ id, name }, idx) => {
+        const ocgData = textByOCGId[id]
+        const hasOCGText = ocgData && ocgData.texts.length > 0
 
-        if (data?.items?.length) {
-          // Use the first text item's position
-          const topItem = data.items.reduce((best, cur) => {
-            // highest in page = largest PDF y = smallest viewport y after convert
-            const [, vy] = vp1.convertToViewportPoint(cur.transform[4], cur.transform[5])
-            const [, bvy] = vp1.convertToViewportPoint(best.transform[4], best.transform[5])
-            return vy < bvy ? cur : best
+        let text: string
+        let items: RichItem[]
+
+        if (hasOCGText) {
+          // OCG-ID matching worked — use it
+          text = ocgData.texts.join(' ').trim()
+          items = ocgData.items.map(it => {
+            const [vx, vy] = vp1.convertToViewportPoint(it.transform[4], it.transform[5])
+            return { str: it.str, vx, vy, fontSize: Math.abs(it.transform[3]) || 12, width: it.width ?? 0, transform: it.transform }
           })
-
-          const [vx, vy] = vp1.convertToViewportPoint(topItem.transform[4], topItem.transform[5])
-          const fs = Math.abs(topItem.transform[3]) || Math.abs(topItem.transform[0]) || 36
-
-          // Bounding box: scan all items
-          let maxVx = vx
-          for (const it of data.items) {
-            const [ivx] = vp1.convertToViewportPoint(it.transform[4], it.transform[5])
-            const iw = (it as { width?: number }).width ?? 0
-            maxVx = Math.max(maxVx, ivx + iw)
+        } else {
+          // Positional fallback: grab the idx-th block
+          const block = positionalBlocks[idx]
+          if (!block) {
+            extractedFields.push({
+              layerName: name.slice(1),
+              value: '',
+              originalText: '',
+              x: 0.05, y: 0.05 + idx * 0.2, width: 0.6,
+              fontSize: 36, color: '#ffffff', fontWeight: 'bold', fontStyle: 'normal', textAlign: 'left',
+            })
+            return
           }
-
-          x = Math.max(0, vx / vp1.width)
-          y = Math.max(0, (vy - fs) / vp1.height)
-          width = Math.min(0.95, Math.max(0.3, (maxVx - vx) / vp1.width))
-          fontSize = fs
-          fontWeight = fs >= 20 ? 'bold' : 'normal'
+          // Sort block items left-to-right and concatenate
+          const sorted = [...block].sort((a, b) => a.vx - b.vx)
+          text = sorted.map(i => i.str).join(' ').trim()
+          items = block
         }
 
+        // Derive position from items
+        const topItem = items.reduce((best, cur) => cur.vy < best.vy ? cur : best)
+        const fs = topItem.fontSize
+        const minVx = Math.min(...items.map(i => i.vx))
+        const maxVx = Math.max(...items.map(i => i.vx + i.width))
+
         extractedFields.push({
-          layerName: name.slice(1), // strip the *
-          value: extractedText,
-          originalText: extractedText,
-          x,
-          y,
-          width,
-          fontSize,
+          layerName: name.slice(1),
+          value: text,
+          originalText: text,
+          x: Math.max(0, minVx / vp1.width),
+          y: Math.max(0, (topItem.vy - fs) / vp1.height),
+          width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
+          fontSize: fs,
           color: '#ffffff',
-          fontWeight,
+          fontWeight: fs >= 18 ? 'bold' : 'normal',
           fontStyle: 'normal',
           textAlign: 'left',
         })
-      }
-
-      // Fallback: if OCG text mapping found nothing, do positional extraction
-      if (extractedFields.length === 0 && starredOCGs.length > 0) {
-        const allTexts = textContent.items
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .filter((it: any) => typeof it.str === 'string' && it.str.trim())
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .sort((a: any, b: any) => {
-            const [, ay] = vp1.convertToViewportPoint(a.transform[4], a.transform[5])
-            const [, by] = vp1.convertToViewportPoint(b.transform[4], b.transform[5])
-            return ay - by
-          })
-
-        starredOCGs.forEach(({ name }, i) => {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const item = allTexts[i] as any
-          const text = item?.str?.trim() ?? ''
-          const [vx, vy] = item
-            ? vp1.convertToViewportPoint(item.transform[4], item.transform[5])
-            : [60, 60 + i * 120]
-          const fs = item ? Math.abs(item.transform[3]) || 36 : 36
-
-          extractedFields.push({
-            layerName: name.slice(1),
-            value: text,
-            originalText: text,
-            x: Math.max(0, vx / vp1.width),
-            y: Math.max(0, (vy - fs) / vp1.height),
-            width: 0.6,
-            fontSize: fs,
-            color: '#ffffff',
-            fontWeight: 'bold',
-            fontStyle: 'normal',
-            textAlign: 'left',
-          })
-        })
-      }
+      })
 
       setFields(extractedFields)
       setStep('fields')
