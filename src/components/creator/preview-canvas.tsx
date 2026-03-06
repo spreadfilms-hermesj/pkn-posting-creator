@@ -8,6 +8,8 @@ import { PostingGraphic } from './posting-graphic'
 interface PreviewCanvasProps {
   config: PostingConfig
   updateConfig: (updates: Partial<PostingConfig>) => void
+  selectedFieldIndex: number | null
+  onSelectField: (i: number) => void
 }
 
 const FORMAT_LABELS: Record<Format, string> = {
@@ -20,7 +22,7 @@ const FORMAT_LABELS: Record<Format, string> = {
 
 const FORMATS: Format[] = ['1:1', '4:3', '3:4', '16:9', '9:16']
 
-export function PreviewCanvas({ config, updateConfig }: PreviewCanvasProps) {
+export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSelectField }: PreviewCanvasProps) {
   const getMainPreviewScale = () => {
     const dims = config.aiImport
       ? { width: config.aiImport.artboardWidth, height: config.aiImport.artboardHeight }
@@ -96,7 +98,7 @@ export function PreviewCanvas({ config, updateConfig }: PreviewCanvasProps) {
                 height: FORMAT_DIMENSIONS[config.format].height,
               }}
             >
-              <PostingGraphic config={config} />
+              <PostingGraphic config={config} selectedFieldIndex={selectedFieldIndex} onSelectField={onSelectField} />
             </div>
           </div>
         </div>

@@ -13,6 +13,7 @@ import { ChevronDown, ChevronUp, FileCode2 } from 'lucide-react'
 interface CreatorSidebarProps {
   config: PostingConfig
   updateConfig: (updates: Partial<PostingConfig>) => void
+  selectedFieldIndex: number | null
 }
 
 interface SectionProps {
@@ -53,13 +54,23 @@ function AIFieldItem({
   index,
   aiImport,
   updateConfig,
+  isSelected,
 }: {
   field: AIEditableField
   index: number
   aiImport: AIImportData
   updateConfig: (updates: Partial<PostingConfig>) => void
+  isSelected: boolean
 }) {
   const [open, setOpen] = useState(true)
+  const ref = React.useRef<HTMLDivElement>(null)
+
+  React.useEffect(() => {
+    if (isSelected) {
+      setOpen(true)
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    }
+  }, [isSelected])
 
   const updateField = (updates: Partial<AIEditableField>) => {
     const updated = aiImport.editableFields.map((f, fi) =>
@@ -69,16 +80,17 @@ function AIFieldItem({
   }
 
   return (
-    <div className="border-t border-white/10 first:border-t-0">
+    <div ref={ref} className="border-t border-white/10 first:border-t-0">
       {/* Header row — After Effects style */}
       <button
         onClick={() => setOpen((v) => !v)}
-        className="w-full flex items-center gap-2 px-4 py-2 hover:bg-white/5 transition-colors text-left"
+        className={`w-full flex items-center gap-2 px-4 py-2 transition-colors text-left ${isSelected ? 'bg-cyan-500/10' : 'hover:bg-white/5'}`}
       >
         <ChevronDown
-          className={`w-3 h-3 text-gray-500 shrink-0 transition-transform ${open ? '' : '-rotate-90'}`}
+          className={`w-3 h-3 shrink-0 transition-transform ${open ? '' : '-rotate-90'} ${isSelected ? 'text-cyan-400' : 'text-gray-500'}`}
         />
-        <span className="font-mono text-xs text-cyan-400 font-semibold tracking-wide">*{field.layerName}</span>
+        <span className={`font-mono text-xs font-semibold tracking-wide ${isSelected ? 'text-cyan-300' : 'text-cyan-400'}`}>*{field.layerName}</span>
+        {isSelected && <span className="ml-auto text-[10px] text-cyan-500 font-normal">aktiv</span>}
       </button>
 
       {open && (
@@ -129,10 +141,12 @@ function AIFieldList({
   fields,
   aiImport,
   updateConfig,
+  selectedFieldIndex,
 }: {
   fields: AIEditableField[]
   aiImport: AIImportData
   updateConfig: (updates: Partial<PostingConfig>) => void
+  selectedFieldIndex: number | null
 }) {
   if (fields.length === 0) {
     return (
@@ -144,13 +158,13 @@ function AIFieldList({
   return (
     <div className="pb-2">
       {fields.map((field, i) => (
-        <AIFieldItem key={i} field={field} index={i} aiImport={aiImport} updateConfig={updateConfig} />
+        <AIFieldItem key={i} field={field} index={i} aiImport={aiImport} updateConfig={updateConfig} isSelected={selectedFieldIndex === i} />
       ))}
     </div>
   )
 }
 
-export function CreatorSidebar({ config, updateConfig }: CreatorSidebarProps) {
+export function CreatorSidebar({ config, updateConfig, selectedFieldIndex }: CreatorSidebarProps) {
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
 
   const toggleSection = (section: string) => {
@@ -188,7 +202,7 @@ export function CreatorSidebar({ config, updateConfig }: CreatorSidebarProps) {
                 Entfernen
               </button>
             </div>
-            <AIFieldList fields={config.aiImport.editableFields} aiImport={config.aiImport} updateConfig={updateConfig} />
+            <AIFieldList fields={config.aiImport.editableFields} aiImport={config.aiImport} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} />
 
           </div>
         )}

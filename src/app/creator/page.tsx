@@ -12,6 +12,7 @@ import { AIImportDialog } from '@/components/creator/ai-import-dialog'
 export default function CreatorPage() {
   const [config, setConfig] = useState<PostingConfig>(defaultConfig)
   const [showAIImport, setShowAIImport] = useState(false)
+  const [selectedFieldIndex, setSelectedFieldIndex] = useState<number | null>(null)
 
   const updateConfig = (updates: Partial<PostingConfig>) => {
     setConfig((prev) => ({ ...prev, ...updates }))
@@ -109,8 +110,8 @@ export default function CreatorPage() {
 
         {/* Main Layout */}
         <div className="flex h-[calc(100vh-57px)]">
-          <CreatorSidebar config={config} updateConfig={updateConfig} />
-          <PreviewCanvas config={config} updateConfig={updateConfig} />
+          <CreatorSidebar config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} />
+          <PreviewCanvas config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} onSelectField={setSelectedFieldIndex} />
         </div>
 
         {/* Export Bar */}

@@ -8,6 +8,8 @@ import { ArrowRight, Calendar, MapPin, Users } from 'lucide-react'
 interface PostingGraphicProps {
   config: PostingConfig
   forExport?: boolean
+  selectedFieldIndex?: number | null
+  onSelectField?: (i: number) => void
 }
 
 // Context so HeadlineText knows whether it's rendering for export (no gradient text)
@@ -26,7 +28,7 @@ function generateStarPositions(count: number) {
   return stars
 }
 
-export function PostingGraphic({ config, forExport = false }: PostingGraphicProps) {
+export function PostingGraphic({ config, forExport = false, selectedFieldIndex, onSelectField }: PostingGraphicProps) {
   const { width, height } = config.aiImport
     ? { width: config.aiImport.artboardWidth, height: config.aiImport.artboardHeight }
     : FORMAT_DIMENSIONS[config.format]
@@ -59,27 +61,35 @@ export function PostingGraphic({ config, forExport = false }: PostingGraphicProp
             crossOrigin="anonymous"
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
           />
-          {editableFields.map((field, i) => (
-            <div
-              key={i}
-              style={{
-                position: 'absolute',
-                left: field.x * artboardWidth,
-                top: field.y * artboardHeight,
-                width: field.width * artboardWidth,
-                fontSize: field.fontSize,
-                color: field.color,
-                fontWeight: field.fontWeight,
-                fontStyle: field.fontStyle,
-                textAlign: field.textAlign,
-                lineHeight: 1.25,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {field.value}
-            </div>
-          ))}
+          {editableFields.map((field, i) => {
+            const isSelected = !forExport && selectedFieldIndex === i
+            return (
+              <div
+                key={i}
+                onClick={forExport ? undefined : () => onSelectField?.(i)}
+                style={{
+                  position: 'absolute',
+                  left: field.x * artboardWidth,
+                  top: field.y * artboardHeight,
+                  width: field.width * artboardWidth,
+                  fontSize: field.fontSize,
+                  color: field.color,
+                  fontWeight: field.fontWeight,
+                  fontStyle: field.fontStyle,
+                  textAlign: field.textAlign,
+                  lineHeight: 1.25,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  cursor: forExport ? 'default' : 'pointer',
+                  outline: isSelected ? '2px solid #22d3ee' : 'none',
+                  outlineOffset: 6,
+                  borderRadius: 2,
+                }}
+              >
+                {field.value}
+              </div>
+            )
+          })}
           {config.logoEnabled && <LogoComponent config={config} />}
         </div>
       </ExportContext.Provider>
