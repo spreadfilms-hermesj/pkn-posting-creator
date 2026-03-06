@@ -27,7 +27,9 @@ function generateStarPositions(count: number) {
 }
 
 export function PostingGraphic({ config, forExport = false }: PostingGraphicProps) {
-  const { width, height } = FORMAT_DIMENSIONS[config.format]
+  const { width, height } = config.aiImport
+    ? { width: config.aiImport.artboardWidth, height: config.aiImport.artboardHeight }
+    : FORMAT_DIMENSIONS[config.format]
   const fontFamily = config.brandSettings.fontFamily === 'Segoe UI'
     ? '"Segoe UI", system-ui, sans-serif'
     : config.brandSettings.fontFamily === 'Inter'
@@ -43,6 +45,46 @@ export function PostingGraphic({ config, forExport = false }: PostingGraphicProp
   const activeGradient = isCarousel && currentSlide ? currentSlide.backgroundGradient : config.backgroundGradient
 
   const stars = generateStarPositions(starCount)
+
+  // ── AI Import mode: render artboard background + editable overlays ─────────
+  if (config.aiImport) {
+    const { backgroundImageUrl, artboardWidth, artboardHeight, editableFields } = config.aiImport
+    return (
+      <ExportContext.Provider value={forExport}>
+        <div style={{ position: 'relative', overflow: 'hidden', width: artboardWidth, height: artboardHeight, flexShrink: 0, fontFamily }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={backgroundImageUrl}
+            alt=""
+            crossOrigin="anonymous"
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+          />
+          {editableFields.map((field, i) => (
+            <div
+              key={i}
+              style={{
+                position: 'absolute',
+                left: field.x * artboardWidth,
+                top: field.y * artboardHeight,
+                width: field.width * artboardWidth,
+                fontSize: field.fontSize,
+                color: field.color,
+                fontWeight: field.fontWeight,
+                fontStyle: field.fontStyle,
+                textAlign: field.textAlign,
+                lineHeight: 1.25,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {field.value}
+            </div>
+          ))}
+          {config.logoEnabled && <LogoComponent config={config} />}
+        </div>
+      </ExportContext.Provider>
+    )
+  }
 
   return (
     <ExportContext.Provider value={forExport}>

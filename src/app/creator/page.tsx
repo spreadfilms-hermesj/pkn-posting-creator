@@ -1,15 +1,17 @@
 'use client'
 
 import React, { useState } from 'react'
-import { Sparkles, Archive, X } from 'lucide-react'
+import { Sparkles, Archive, X, FileCode2 } from 'lucide-react'
 import type { PostingConfig } from '@/types/posting'
 import { defaultConfig } from '@/types/posting'
 import { CreatorSidebar } from '@/components/creator/creator-sidebar'
 import { PreviewCanvas } from '@/components/creator/preview-canvas'
 import { ExportBar } from '@/components/creator/export-bar'
+import { AIImportDialog } from '@/components/creator/ai-import-dialog'
 
 export default function CreatorPage() {
   const [config, setConfig] = useState<PostingConfig>(defaultConfig)
+  const [showAIImport, setShowAIImport] = useState(false)
 
   const updateConfig = (updates: Partial<PostingConfig>) => {
     setConfig((prev) => ({ ...prev, ...updates }))
@@ -49,6 +51,15 @@ export default function CreatorPage() {
                   <p className="text-xs text-cyan-400">Mission Control</p>
                 </div>
               </div>
+
+              {/* AI Import Button */}
+              <button
+                onClick={() => setShowAIImport(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 hover:from-cyan-500/30 hover:to-blue-600/30 text-cyan-300 border border-cyan-500/30 text-sm font-medium transition-all"
+              >
+                <FileCode2 className="w-4 h-4" />
+                AI importieren
+              </button>
 
               {/* Preset Buttons */}
               <div className="flex items-center gap-2">
@@ -105,6 +116,17 @@ export default function CreatorPage() {
         {/* Export Bar */}
         <ExportBar config={config} />
       </div>
+
+      {/* AI Import Dialog */}
+      {showAIImport && (
+        <AIImportDialog
+          onImport={(aiImportData) => {
+            updateConfig({ aiImport: aiImportData })
+            setShowAIImport(false)
+          }}
+          onClose={() => setShowAIImport(false)}
+        />
+      )}
     </div>
   )
 }

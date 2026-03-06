@@ -22,13 +22,15 @@ const FORMATS: Format[] = ['1:1', '4:3', '3:4', '16:9', '9:16']
 
 export function PreviewCanvas({ config, updateConfig }: PreviewCanvasProps) {
   const getMainPreviewScale = () => {
-    const { width, height } = FORMAT_DIMENSIONS[config.format]
+    const dims = config.aiImport
+      ? { width: config.aiImport.artboardWidth, height: config.aiImport.artboardHeight }
+      : FORMAT_DIMENSIONS[config.format]
     const maxWidth = 750
     const maxHeight = 570
-    const scaleX = maxWidth / width
-    const scaleY = maxHeight / height
+    const scaleX = maxWidth / dims.width
+    const scaleY = maxHeight / dims.height
     const scale = Math.min(scaleX, scaleY, 1)
-    return { scale, width: Math.round(width * scale), height: Math.round(height * scale) }
+    return { scale, width: Math.round(dims.width * scale), height: Math.round(dims.height * scale) }
   }
 
   const getMiniScale = (format: Format) => {
@@ -48,24 +50,35 @@ export function PreviewCanvas({ config, updateConfig }: PreviewCanvasProps) {
         <div className="mb-6 flex items-center justify-between">
           <div>
             <h2 className="text-xl font-bold text-white mb-1">Live Preview</h2>
-            <p className="text-sm text-gray-400">{FORMAT_LABELS[config.format]}</p>
-            <p className="text-xs text-cyan-400 mt-1">✓ Was du siehst = Finales Posting</p>
+            {config.aiImport ? (
+              <>
+                <p className="text-sm text-gray-400">{config.aiImport.artboardName} · {config.aiImport.artboardWidth} × {config.aiImport.artboardHeight} px</p>
+                <p className="text-xs text-cyan-400 mt-1">AI Import — Felder links bearbeiten</p>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-400">{FORMAT_LABELS[config.format]}</p>
+                <p className="text-xs text-cyan-400 mt-1">✓ Was du siehst = Finales Posting</p>
+              </>
+            )}
           </div>
-          <div className="flex gap-2">
-            {FORMATS.map((format) => (
-              <button
-                key={format}
-                onClick={() => updateConfig({ format })}
-                className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                  config.format === format
-                    ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/50'
-                    : 'bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white'
-                }`}
-              >
-                {format}
-              </button>
-            ))}
-          </div>
+          {!config.aiImport && (
+            <div className="flex gap-2">
+              {FORMATS.map((format) => (
+                <button
+                  key={format}
+                  onClick={() => updateConfig({ format })}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    config.format === format
+                      ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/50'
+                      : 'bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white'
+                  }`}
+                >
+                  {format}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Main Preview */}
@@ -88,8 +101,8 @@ export function PreviewCanvas({ config, updateConfig }: PreviewCanvasProps) {
           </div>
         </div>
 
-        {/* Mini Previews */}
-        <div className="mt-8 flex gap-4 justify-center flex-wrap">
+        {/* Mini Previews — hidden in AI import mode */}
+        <div className={`mt-8 flex gap-4 justify-center flex-wrap ${config.aiImport ? 'hidden' : ''}`}>
           {FORMATS.map((format) => {
             const mini = getMiniScale(format)
             const { width: fw, height: fh } = FORMAT_DIMENSIONS[format]

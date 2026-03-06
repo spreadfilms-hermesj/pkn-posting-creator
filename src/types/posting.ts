@@ -1,3 +1,25 @@
+export interface AIEditableField {
+  layerName: string      // e.g. "Headline" (the * is stripped)
+  value: string          // current editable text
+  originalText: string   // as extracted from AI
+  x: number              // normalized 0–1 on artboard
+  y: number
+  width: number
+  fontSize: number       // in artboard native px
+  color: string
+  fontWeight: 'normal' | 'bold'
+  fontStyle: 'normal' | 'italic'
+  textAlign: 'left' | 'center' | 'right'
+}
+
+export interface AIImportData {
+  backgroundImageUrl: string  // artboard rendered without * layers
+  artboardWidth: number
+  artboardHeight: number
+  artboardName: string
+  editableFields: AIEditableField[]
+}
+
 export interface BrandSettings {
   logo: string | null
   logoText: string
@@ -78,6 +100,9 @@ export interface PostingConfig {
 
   // Brand Settings
   brandSettings: BrandSettings
+
+  // AI Import
+  aiImport: AIImportData | null
 }
 
 export const defaultBrandSettings: BrandSettings = {
@@ -122,6 +147,7 @@ export const defaultConfig: PostingConfig = {
   brandSettings: defaultBrandSettings,
   carouselSlides: [],
   currentSlideIndex: 0,
+  aiImport: null,
 }
 
 export const FORMAT_DIMENSIONS: Record<Format, { width: number; height: number }> = {

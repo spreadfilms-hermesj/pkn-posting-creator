@@ -8,7 +8,7 @@ import { BrandToggles } from './brand-toggles'
 import { BrandSettingsComponent } from './brand-settings'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileCode2 } from 'lucide-react'
 
 interface CreatorSidebarProps {
   config: PostingConfig
@@ -65,6 +65,52 @@ export function CreatorSidebar({ config, updateConfig }: CreatorSidebarProps) {
   return (
     <div className="w-[400px] min-w-[400px] border-r border-white/10 bg-black/20 backdrop-blur-xl overflow-y-auto">
       <div className="p-4 pb-24 space-y-3">
+
+        {/* AI Import — shown when an AI file has been imported */}
+        {config.aiImport && (
+          <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-2xl overflow-hidden">
+            <div className="px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileCode2 className="w-4 h-4 text-cyan-400" />
+                <span className="text-base font-semibold text-white">AI Import</span>
+                <span className="text-xs bg-cyan-500/30 text-cyan-300 px-2 py-0.5 rounded-full">
+                  {config.aiImport.artboardName}
+                </span>
+              </div>
+              <button
+                onClick={() => updateConfig({ aiImport: null })}
+                className="text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg border border-red-500/20 transition-all"
+              >
+                Entfernen
+              </button>
+            </div>
+            <div className="px-6 pb-6 space-y-4">
+              {config.aiImport.editableFields.length === 0 ? (
+                <p className="text-sm text-gray-400">Keine editierbaren Felder (keine Layer mit * Präfix gefunden).</p>
+              ) : (
+                config.aiImport.editableFields.map((field, i) => (
+                  <div key={i}>
+                    <Label className="text-gray-300 flex items-center gap-2 mb-2">
+                      <span className="font-mono text-xs bg-white/10 px-2 py-0.5 rounded text-cyan-400">*{field.layerName}</span>
+                    </Label>
+                    <textarea
+                      value={field.value}
+                      onChange={(e) => {
+                        const updated = config.aiImport!.editableFields.map((f, fi) =>
+                          fi === i ? { ...f, value: e.target.value } : f
+                        )
+                        updateConfig({ aiImport: { ...config.aiImport!, editableFields: updated } })
+                      }}
+                      className="w-full px-3 py-2 bg-white/5 border border-white/20 text-white rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none"
+                      rows={field.value.includes('\n') ? 3 : 2}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Brand / CI */}
         <Section
           title="0. Brand / CI"
