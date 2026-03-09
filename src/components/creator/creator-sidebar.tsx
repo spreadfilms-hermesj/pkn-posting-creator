@@ -64,8 +64,15 @@ function AIFieldItem({
 }) {
   const [open, setOpen] = useState(true)
   const ref = React.useRef<HTMLDivElement>(null)
-  const undoStack = React.useRef<string[]>([field.value])
-  const undoIndex = React.useRef(0)
+  // Track Shift key for spinner-click detection (mouse clicks don't fire onKeyDown)
+  const shiftRef = React.useRef(false)
+
+  React.useEffect(() => {
+    const track = (e: KeyboardEvent) => { shiftRef.current = e.shiftKey }
+    window.addEventListener('keydown', track, true)
+    window.addEventListener('keyup', track, true)
+    return () => { window.removeEventListener('keydown', track, true); window.removeEventListener('keyup', track, true) }
+  }, [])
 
   React.useEffect(() => {
     if (isSelected) {
@@ -81,38 +88,35 @@ function AIFieldItem({
     updateConfig({ aiImport: { ...aiImport, editableFields: updated } })
   }
 
-  const handleTextChange = (newValue: string) => {
-    // Trim history beyond current index (discard redo), then push new entry
-    undoStack.current = undoStack.current.slice(0, undoIndex.current + 1)
-    undoStack.current.push(newValue)
-    undoIndex.current = undoStack.current.length - 1
-    updateField({ value: newValue })
-  }
-
-  const handleTextKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
-      e.preventDefault()
-      if (undoIndex.current > 0) {
-        undoIndex.current--
-        updateField({ value: undoStack.current[undoIndex.current] })
-      }
-    }
-  }
-
-  // Shift+Arrow on number inputs steps by 1 instead of the base step
-  const handleNumericKeyDown = (
-    e: React.KeyboardEvent<HTMLInputElement>,
-    current: number,
+  // Returns onKeyDown + onChange handlers for a numeric input.
+  // ArrowUp/Down apply baseStep; Shift+ArrowUp/Down or Shift+spinner apply shiftStep.
+  const numericProps = (
+    getVal: () => number,
     onUpdate: (v: number) => void,
-    shiftStep: number
-  ) => {
-    if (!e.shiftKey) return
-    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    baseStep: number,
+    shiftStep: number,
+    min = -Infinity,
+    max = Infinity
+  ) => ({
+    onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
       e.preventDefault()
-      const delta = e.key === 'ArrowUp' ? shiftStep : -shiftStep
-      onUpdate(Math.round((current + delta) * 1000) / 1000)
-    }
-  }
+      const step = e.shiftKey ? shiftStep : baseStep
+      const dir = e.key === 'ArrowUp' ? 1 : -1
+      onUpdate(Math.max(min, Math.min(max, Math.round((getVal() + dir * step) * 1000) / 1000)))
+    },
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+      const newVal = parseFloat(e.target.value)
+      if (isNaN(newVal)) return
+      if (shiftRef.current) {
+        // Spinner clicked while Shift held: detect direction, apply shiftStep
+        const dir = newVal >= getVal() ? 1 : -1
+        onUpdate(Math.max(min, Math.min(max, Math.round((getVal() + dir * shiftStep) * 1000) / 1000)))
+      } else {
+        onUpdate(Math.max(min, Math.min(max, newVal)))
+      }
+    },
+  })
 
   return (
     <div ref={ref} className="border-t border-white/10 first:border-t-0">
@@ -134,8 +138,7 @@ function AIFieldItem({
           {field.type !== 'graphic' && (
             <textarea
               value={field.value}
-              onChange={(e) => handleTextChange(e.target.value)}
-              onKeyDown={handleTextKeyDown}
+              onChange={(e) => updateField({ value: e.target.value })}
               className="w-full px-3 py-2 bg-black/30 border border-white/10 text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
               rows={field.value.includes('\n') ? 3 : 2}
             />
@@ -151,17 +154,23 @@ function AIFieldItem({
             <input
               type="number" min={0} max={100} step={0.1}
               value={Math.round(field.x * 1000) / 10}
-              onChange={(e) => updateField({ x: parseFloat(e.target.value) / 100 })}
-              onKeyDown={(e) => handleNumericKeyDown(e, Math.round(field.x * 1000) / 10, (v) => updateField({ x: Math.max(0, Math.min(100, v)) / 100 }), 1)}
               className="w-16 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
+              {...numericProps(
+                () => Math.round(field.x * 1000) / 10,
+                (v) => updateField({ x: v / 100 }),
+                0.1, 1, 0, 100
+              )}
             />
             <span className="w-3 text-right shrink-0">Y</span>
             <input
               type="number" min={0} max={100} step={0.1}
               value={Math.round(field.y * 1000) / 10}
-              onChange={(e) => updateField({ y: parseFloat(e.target.value) / 100 })}
-              onKeyDown={(e) => handleNumericKeyDown(e, Math.round(field.y * 1000) / 10, (v) => updateField({ y: Math.max(0, Math.min(100, v)) / 100 }), 1)}
               className="w-16 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
+              {...numericProps(
+                () => Math.round(field.y * 1000) / 10,
+                (v) => updateField({ y: v / 100 }),
+                0.1, 1, 0, 100
+              )}
             />
             {field.type === 'graphic' ? (
               <>
@@ -169,9 +178,12 @@ function AIFieldItem({
                 <input
                   type="number" min={0.1} max={5} step={0.05}
                   value={Math.round((field.scale ?? 1) * 100) / 100}
-                  onChange={(e) => updateField({ scale: parseFloat(e.target.value) })}
-                  onKeyDown={(e) => handleNumericKeyDown(e, field.scale ?? 1, (v) => updateField({ scale: Math.max(0.1, Math.min(5, v)) }), 1)}
                   className="w-14 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
+                  {...numericProps(
+                    () => field.scale ?? 1,
+                    (v) => updateField({ scale: v }),
+                    0.05, 1, 0.1, 5
+                  )}
                 />
               </>
             ) : (

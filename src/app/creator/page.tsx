@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Sparkles, Archive, X, FileCode2 } from 'lucide-react'
 import type { PostingConfig } from '@/types/posting'
 import { defaultConfig } from '@/types/posting'
@@ -14,9 +14,35 @@ export default function CreatorPage() {
   const [showAIImport, setShowAIImport] = useState(false)
   const [selectedFieldIndex, setSelectedFieldIndex] = useState<number | null>(null)
 
-  const updateConfig = (updates: Partial<PostingConfig>) => {
-    setConfig((prev) => ({ ...prev, ...updates }))
-  }
+  // ── Global undo history ───────────────────────────────────────────────────
+  const configRef = useRef<PostingConfig>(defaultConfig)
+  const historyRef = useRef<PostingConfig[]>([defaultConfig])
+  const historyIdxRef = useRef(0)
+
+  const updateConfig = useCallback((updates: Partial<PostingConfig>) => {
+    const next = { ...configRef.current, ...updates }
+    configRef.current = next
+    // Trim any redo states, push new state, cap at 100 entries
+    historyRef.current = [...historyRef.current.slice(0, historyIdxRef.current + 1), next].slice(-100)
+    historyIdxRef.current = historyRef.current.length - 1
+    setConfig(next)
+  }, [])
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault()
+        if (historyIdxRef.current > 0) {
+          historyIdxRef.current--
+          const prev = historyRef.current[historyIdxRef.current]
+          configRef.current = prev
+          setConfig(prev)
+        }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
 
   return (
     <div className="min-h-screen bg-[#0a0118] relative overflow-hidden">
