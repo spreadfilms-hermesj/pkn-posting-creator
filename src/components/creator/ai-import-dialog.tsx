@@ -232,6 +232,16 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       // ── Render full page (all layers visible) ────────────────────────────
       const renderScale = Math.max(2, 1080 / artboard.width)
       const renderVp = page.getViewport({ scale: renderScale })
+      const artW_px = Math.round(renderVp.width)
+      const artH_px = Math.round(renderVp.height)
+
+      // Padded viewport: 50% extra space on each side so content that extends
+      // beyond the artboard in Illustrator is captured during extraction.
+      const padX = Math.round(artW_px * 0.5)
+      const padY = Math.round(artH_px * 0.5)
+      const paddedVp = page.getViewport({ scale: renderScale, offsetX: padX, offsetY: padY })
+      const paddedW = artW_px + padX * 2
+      const paddedH = artH_px + padY * 2
 
       // Force all effective OCGs visible for full render (some may default to hidden)
       const fullRenderCfg = await pdf.getOptionalContentConfig()
@@ -239,20 +249,22 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         if (isOCG) try { fullRenderCfg.setVisibility(id, true) } catch { /* unsupported */ }
       }
 
+      // fullCanvas is padded — used for graphic extraction (captures overflow content)
       const fullCanvas = document.createElement('canvas')
-      fullCanvas.width = Math.round(renderVp.width)
-      fullCanvas.height = Math.round(renderVp.height)
+      fullCanvas.width = paddedW
+      fullCanvas.height = paddedH
       const fullCtx = fullCanvas.getContext('2d')!
-      await page.render({ canvas: fullCanvas, canvasContext: fullCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(fullRenderCfg) }).promise
+      await page.render({ canvas: fullCanvas, canvasContext: fullCtx, viewport: paddedVp, optionalContentConfigPromise: Promise.resolve(fullRenderCfg) }).promise
 
       // ── Render background (all effective OCG layers hidden) ───────────────
+      // bgCanvas is artboard-sized only — used as the displayed background image
       const bgCfg = await pdf.getOptionalContentConfig()
       for (const { id, isOCG } of effectiveOCGs) {
         if (isOCG) try { bgCfg.setVisibility(id, false) } catch { /* unsupported */ }
       }
       const bgCanvas = document.createElement('canvas')
-      bgCanvas.width = fullCanvas.width
-      bgCanvas.height = fullCanvas.height
+      bgCanvas.width = artW_px
+      bgCanvas.height = artH_px
       const bgCtx = bgCanvas.getContext('2d')!
       await page.render({
         canvas: bgCanvas, canvasContext: bgCtx, viewport: renderVp,
@@ -359,7 +371,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           if (!ocgIsText.get(inOCG)) {
             const addPoint = (ux: number, uy: number) => {
               const [vpx, vpy] = vp1.convertToViewportPoint(ux, uy)
-              const cx2 = vpx * renderScale, cy2 = vpy * renderScale
+              const cx2 = vpx * renderScale + padX, cy2 = vpy * renderScale + padY
               if (!ocgPathBBox.has(inOCG)) ocgPathBBox.set(inOCG, {minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity})
               const bb = ocgPathBBox.get(inOCG)!
               bb.minX = Math.min(bb.minX, cx2); bb.maxX = Math.max(bb.maxX, cx2)
@@ -488,71 +500,76 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           let gx = 0.05, gy = 0.3, gw = 0.4, gh = 0.4
           const pad2 = 16
 
-          // Primary method for registered OCGs: pixel-diff (works regardless of whether
-          // the graphic uses paths, images, or any other drawing ops)
+          // Helper: convert padded-canvas crop rect → artboard-relative normalized coords,
+          // crop the image from fullCanvas, and erase the artboard-overlap from bgCanvas.
+          const applyGraphicCrop = (cropX: number, cropY: number, cropW: number, cropH: number) => {
+            if (cropW <= 4 || cropH <= 4) return false
+            const cc = document.createElement('canvas')
+            cc.width = cropW; cc.height = cropH
+            cc.getContext('2d')!.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
+            imageUrl = cc.toDataURL('image/png')
+            // artboard-relative position (can be negative / > 1 for overflow)
+            gx = (cropX - padX) / artW_px
+            gy = (cropY - padY) / artH_px
+            gw = cropW / artW_px
+            gh = cropH / artH_px
+            // Erase only the artboard-region overlap from bgCanvas
+            const bgX = Math.max(0, cropX - padX)
+            const bgY = Math.max(0, cropY - padY)
+            const bgW = Math.min(artW_px - bgX, cropW - Math.max(0, padX - cropX))
+            const bgH = Math.min(artH_px - bgY, cropH - Math.max(0, padY - cropY))
+            if (bgW > 0 && bgH > 0) paintOver(bgX, bgY, bgW, bgH)
+            return true
+          }
+
+          // Primary method for registered OCGs: pixel-diff on padded canvas
+          // (captures content outside artboard bounds)
           if (ocgIsRegistered) {
             try {
-              // Render page with all effective OCGs visible EXCEPT this one → diff
-              // against fullCanvas to isolate exactly what this OCG contributes
               const withoutCfg = await pdf.getOptionalContentConfig()
               for (const { id: eid, isOCG: eidIsOCG } of effectiveOCGs) {
                 if (eidIsOCG) try { withoutCfg.setVisibility(eid, eid !== ocgId) } catch { /* unsupported */ }
               }
               const withoutCanvas = document.createElement('canvas')
-              withoutCanvas.width = fullCanvas.width; withoutCanvas.height = fullCanvas.height
-              await page.render({ canvas: withoutCanvas, canvasContext: withoutCanvas.getContext('2d')!, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
+              withoutCanvas.width = paddedW; withoutCanvas.height = paddedH
+              await page.render({ canvas: withoutCanvas, canvasContext: withoutCanvas.getContext('2d')!, viewport: paddedVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
 
               const diffBBox = pixelDiff(
-                fullCtx.getImageData(0, 0, fullCanvas.width, fullCanvas.height).data,
-                withoutCanvas.getContext('2d')!.getImageData(0, 0, withoutCanvas.width, withoutCanvas.height).data,
-                fullCanvas.width, fullCanvas.height
+                fullCtx.getImageData(0, 0, paddedW, paddedH).data,
+                withoutCanvas.getContext('2d')!.getImageData(0, 0, paddedW, paddedH).data,
+                paddedW, paddedH
               )
 
               if (diffBBox) {
-                const dx = Math.max(0, diffBBox.minX - pad2)
-                const dy = Math.max(0, diffBBox.minY - pad2)
-                const dw = Math.min(fullCanvas.width - dx, diffBBox.maxX - diffBBox.minX + pad2 * 2)
-                const dh = Math.min(fullCanvas.height - dy, diffBBox.maxY - diffBBox.minY + pad2 * 2)
-                const cc = document.createElement('canvas')
-                cc.width = dw; cc.height = dh
-                cc.getContext('2d')!.drawImage(fullCanvas, dx, dy, dw, dh, 0, 0, dw, dh)
-                imageUrl = cc.toDataURL('image/png')
-                gx = dx / fullCanvas.width; gy = dy / fullCanvas.height
-                gw = dw / fullCanvas.width; gh = dh / fullCanvas.height
-                paintOver(dx, dy, dw, dh)
+                const cropX = Math.max(0, diffBBox.minX - pad2)
+                const cropY = Math.max(0, diffBBox.minY - pad2)
+                const cropW = Math.min(paddedW - cropX, diffBBox.maxX - diffBBox.minX + pad2 * 2)
+                const cropH = Math.min(paddedH - cropY, diffBBox.maxY - diffBBox.minY + pad2 * 2)
+                applyGraphicCrop(cropX, cropY, cropW, cropH)
               } else {
-                // setVisibility may not be hiding it — try rendering with ONLY this OCG
-                // visible to isolate the graphic
+                // Fallback: render with ONLY this OCG visible, diff against blank
                 const onlyCfg = await pdf.getOptionalContentConfig()
                 for (const { id: eid, isOCG: eidIsOCG } of allOCGs) {
                   if (eidIsOCG) try { onlyCfg.setVisibility(eid, false) } catch { /* unsupported */ }
                 }
                 try { onlyCfg.setVisibility(ocgId, true) } catch { /* unsupported */ }
                 const onlyCanvas = document.createElement('canvas')
-                onlyCanvas.width = fullCanvas.width; onlyCanvas.height = fullCanvas.height
-                await page.render({ canvas: onlyCanvas, canvasContext: onlyCanvas.getContext('2d')!, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(onlyCfg) }).promise
-                // Diff isolated render against blank white to find where the graphic actually is
-                const blankData = new Uint8ClampedArray(fullCanvas.width * fullCanvas.height * 4).fill(255)
+                onlyCanvas.width = paddedW; onlyCanvas.height = paddedH
+                await page.render({ canvas: onlyCanvas, canvasContext: onlyCanvas.getContext('2d')!, viewport: paddedVp, optionalContentConfigPromise: Promise.resolve(onlyCfg) }).promise
+                const blankData = new Uint8ClampedArray(paddedW * paddedH * 4).fill(255)
                 const onlyDiff = pixelDiff(
-                  onlyCanvas.getContext('2d')!.getImageData(0, 0, onlyCanvas.width, onlyCanvas.height).data,
-                  blankData, onlyCanvas.width, onlyCanvas.height, 10
+                  onlyCanvas.getContext('2d')!.getImageData(0, 0, paddedW, paddedH).data,
+                  blankData, paddedW, paddedH, 10
                 )
                 if (onlyDiff) {
-                  const dx = Math.max(0, onlyDiff.minX - pad2)
-                  const dy = Math.max(0, onlyDiff.minY - pad2)
-                  const dw = Math.min(fullCanvas.width - dx, onlyDiff.maxX - onlyDiff.minX + pad2 * 2)
-                  const dh = Math.min(fullCanvas.height - dy, onlyDiff.maxY - onlyDiff.minY + pad2 * 2)
-                  const cc = document.createElement('canvas')
-                  cc.width = dw; cc.height = dh
-                  cc.getContext('2d')!.drawImage(fullCanvas, dx, dy, dw, dh, 0, 0, dw, dh)
-                  imageUrl = cc.toDataURL('image/png')
-                  gx = dx / fullCanvas.width; gy = dy / fullCanvas.height
-                  gw = dw / fullCanvas.width; gh = dh / fullCanvas.height
-                  paintOver(dx, dy, dw, dh)
+                  const cropX = Math.max(0, onlyDiff.minX - pad2)
+                  const cropY = Math.max(0, onlyDiff.minY - pad2)
+                  const cropW = Math.min(paddedW - cropX, onlyDiff.maxX - onlyDiff.minX + pad2 * 2)
+                  const cropH = Math.min(paddedH - cropY, onlyDiff.maxY - onlyDiff.minY + pad2 * 2)
+                  applyGraphicCrop(cropX, cropY, cropW, cropH)
                 } else {
-                  // Last resort: use full isolated render at full artboard size
                   imageUrl = onlyCanvas.toDataURL('image/png')
-                  gx = 0; gy = 0; gw = 1; gh = 1
+                  gx = -0.5; gy = -0.5; gw = 2; gh = 2
                 }
               }
             } catch (e) {
@@ -560,23 +577,15 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             }
           }
 
-          // Fallback for non-registered OCGs or if pixel-diff failed: operator list bbox crop
+          // Fallback for non-registered OCGs: operator list bbox (coords in padded space)
           if (!imageUrl) {
             const opBBox = ocgPathBBox.get(ocgId)
             if (opBBox && opBBox.maxX > opBBox.minX && opBBox.maxY > opBBox.minY) {
               const cropX = Math.max(0, Math.floor(opBBox.minX) - pad2)
               const cropY = Math.max(0, Math.floor(opBBox.minY) - pad2)
-              const cropW = Math.min(fullCanvas.width - cropX, Math.ceil(opBBox.maxX - opBBox.minX) + pad2 * 2)
-              const cropH = Math.min(fullCanvas.height - cropY, Math.ceil(opBBox.maxY - opBBox.minY) + pad2 * 2)
-              if (cropW > 4 && cropH > 4) {
-                const cc = document.createElement('canvas')
-                cc.width = cropW; cc.height = cropH
-                cc.getContext('2d')!.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
-                imageUrl = cc.toDataURL('image/png')
-                gx = cropX / fullCanvas.width; gy = cropY / fullCanvas.height
-                gw = cropW / fullCanvas.width; gh = cropH / fullCanvas.height
-                paintOver(cropX, cropY, cropW, cropH)
-              }
+              const cropW = Math.min(paddedW - cropX, Math.ceil(opBBox.maxX - opBBox.minX) + pad2 * 2)
+              const cropH = Math.min(paddedH - cropY, Math.ceil(opBBox.maxY - opBBox.minY) + pad2 * 2)
+              applyGraphicCrop(cropX, cropY, cropW, cropH)
             }
           }
 

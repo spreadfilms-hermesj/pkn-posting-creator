@@ -53,7 +53,7 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
     const { backgroundImageUrl, artboardWidth, artboardHeight, editableFields } = config.aiImport
     return (
       <ExportContext.Provider value={forExport}>
-        <div style={{ position: 'relative', overflow: 'hidden', width: artboardWidth, height: artboardHeight, flexShrink: 0, fontFamily }}>
+        <div style={{ position: 'relative', overflow: forExport ? 'hidden' : 'visible', width: artboardWidth, height: artboardHeight, flexShrink: 0, fontFamily }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={backgroundImageUrl}
