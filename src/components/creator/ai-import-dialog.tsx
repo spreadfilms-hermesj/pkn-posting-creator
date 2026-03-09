@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useRef, useCallback } from 'react'
-import { Upload, X, ChevronRight, Loader2, FileCheck, AlertCircle } from 'lucide-react'
+import { Upload, X, ChevronRight, Loader2, FileCheck, AlertCircle, RotateCcw } from 'lucide-react'
 import type { AIImportData, AIEditableField } from '@/types/posting'
 import { Label } from '@/components/ui/label'
 
@@ -632,6 +632,16 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
     setFields((prev) => prev.map((f, i) => (i === index ? { ...f, value } : f)))
   }
 
+  const resetFieldValue = (index: number) => {
+    setFields((prev) => prev.map((f, i) => (i === index ? { ...f, value: f.originalText } : f)))
+  }
+
+  const resetAllFields = () => {
+    setFields((prev) => prev.map((f) => ({ ...f, value: f.originalText })))
+  }
+
+  const hasAnyChange = fields.some((f) => f.type === 'text' && f.value !== f.originalText)
+
   // ── UI ────────────────────────────────────────────────────────────────────
 
   return (
@@ -765,14 +775,35 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      <p className="text-sm text-gray-400">
-                        <span className="text-cyan-400 font-semibold">{fields.length} editierbare Felder</span> erkannt — Texte jetzt anpassen oder später im Editor ändern:
-                      </p>
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm text-gray-400">
+                          <span className="text-cyan-400 font-semibold">{fields.length} editierbare Felder</span> erkannt — Texte jetzt anpassen oder später im Editor ändern:
+                        </p>
+                        {hasAnyChange && (
+                          <button
+                            onClick={resetAllFields}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:text-white hover:bg-white/10 transition-all"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            Alle zurücksetzen
+                          </button>
+                        )}
+                      </div>
                       {fields.map((field, i) => (
                         <div key={i}>
                           <Label className="text-gray-300 flex items-center gap-2 mb-2">
                             <span className="text-cyan-400 text-xs bg-cyan-500/20 px-2 py-0.5 rounded font-mono">*{field.layerName}</span>
                             <span className="text-xs text-gray-500">{field.type === 'graphic' ? 'Grafik-Layer' : 'Text-Layer'}</span>
+                            {field.type === 'text' && field.value !== field.originalText && (
+                              <button
+                                onClick={() => resetFieldValue(i)}
+                                title="Auf Original zurücksetzen"
+                                className="ml-auto flex items-center gap-1 text-xs text-gray-500 hover:text-cyan-400 transition-colors"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                Reset
+                              </button>
+                            )}
                           </Label>
                           {field.type === 'graphic' ? (
                             field.imageUrl ? (
