@@ -235,26 +235,18 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const artW_px = Math.round(renderVp.width)
       const artH_px = Math.round(renderVp.height)
 
-      // Padded viewport: 50% extra space on each side so content that extends
-      // beyond the artboard in Illustrator is captured during extraction.
-      const padX = Math.round(artW_px * 0.5)
-      const padY = Math.round(artH_px * 0.5)
-      const paddedVp = page.getViewport({ scale: renderScale, offsetX: padX, offsetY: padY })
-      const paddedW = artW_px + padX * 2
-      const paddedH = artH_px + padY * 2
-
       // Force all effective OCGs visible for full render (some may default to hidden)
       const fullRenderCfg = await pdf.getOptionalContentConfig()
       for (const { id, isOCG } of effectiveOCGs) {
         if (isOCG) try { fullRenderCfg.setVisibility(id, true) } catch { /* unsupported */ }
       }
 
-      // fullCanvas is padded — used for graphic extraction (captures overflow content)
+      // fullCanvas is artboard-sized — used for graphic extraction via pixel-diff
       const fullCanvas = document.createElement('canvas')
-      fullCanvas.width = paddedW
-      fullCanvas.height = paddedH
+      fullCanvas.width = artW_px
+      fullCanvas.height = artH_px
       const fullCtx = fullCanvas.getContext('2d')!
-      await page.render({ canvas: fullCanvas, canvasContext: fullCtx, viewport: paddedVp, optionalContentConfigPromise: Promise.resolve(fullRenderCfg) }).promise
+      await page.render({ canvas: fullCanvas, canvasContext: fullCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(fullRenderCfg) }).promise
 
       // ── Render background (all effective OCG layers hidden) ───────────────
       // bgCanvas is artboard-sized only — used as the displayed background image
@@ -371,7 +363,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           if (!ocgIsText.get(inOCG)) {
             const addPoint = (ux: number, uy: number) => {
               const [vpx, vpy] = vp1.convertToViewportPoint(ux, uy)
-              const cx2 = vpx * renderScale + padX, cy2 = vpy * renderScale + padY
+              const cx2 = vpx * renderScale, cy2 = vpy * renderScale
               if (!ocgPathBBox.has(inOCG)) ocgPathBBox.set(inOCG, {minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity})
               const bb = ocgPathBBox.get(inOCG)!
               bb.minX = Math.min(bb.minX, cx2); bb.maxX = Math.max(bb.maxX, cx2)
@@ -500,25 +492,19 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           let gx = 0.05, gy = 0.3, gw = 0.4, gh = 0.4
           const pad2 = 16
 
-          // Helper: convert padded-canvas crop rect → artboard-relative normalized coords,
-          // crop the image from fullCanvas, and erase the artboard-overlap from bgCanvas.
+          // Helper: crop a rect from fullCanvas, set normalized artboard coords,
+          // and erase the region from bgCanvas.
           const applyGraphicCrop = (cropX: number, cropY: number, cropW: number, cropH: number) => {
             if (cropW <= 4 || cropH <= 4) return false
             const cc = document.createElement('canvas')
             cc.width = cropW; cc.height = cropH
             cc.getContext('2d')!.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
             imageUrl = cc.toDataURL('image/png')
-            // artboard-relative position (can be negative / > 1 for overflow)
-            gx = (cropX - padX) / artW_px
-            gy = (cropY - padY) / artH_px
+            gx = cropX / artW_px
+            gy = cropY / artH_px
             gw = cropW / artW_px
             gh = cropH / artH_px
-            // Erase only the artboard-region overlap from bgCanvas
-            const bgX = Math.max(0, cropX - padX)
-            const bgY = Math.max(0, cropY - padY)
-            const bgW = Math.min(artW_px - bgX, cropW - Math.max(0, padX - cropX))
-            const bgH = Math.min(artH_px - bgY, cropH - Math.max(0, padY - cropY))
-            if (bgW > 0 && bgH > 0) paintOver(bgX, bgY, bgW, bgH)
+            paintOver(cropX, cropY, cropW, cropH)
             return true
           }
 
@@ -531,20 +517,20 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                 if (eidIsOCG) try { withoutCfg.setVisibility(eid, eid !== ocgId) } catch { /* unsupported */ }
               }
               const withoutCanvas = document.createElement('canvas')
-              withoutCanvas.width = paddedW; withoutCanvas.height = paddedH
-              await page.render({ canvas: withoutCanvas, canvasContext: withoutCanvas.getContext('2d')!, viewport: paddedVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
+              withoutCanvas.width = artW_px; withoutCanvas.height = artH_px
+              await page.render({ canvas: withoutCanvas, canvasContext: withoutCanvas.getContext('2d')!, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
 
               const diffBBox = pixelDiff(
-                fullCtx.getImageData(0, 0, paddedW, paddedH).data,
-                withoutCanvas.getContext('2d')!.getImageData(0, 0, paddedW, paddedH).data,
-                paddedW, paddedH
+                fullCtx.getImageData(0, 0, artW_px, artH_px).data,
+                withoutCanvas.getContext('2d')!.getImageData(0, 0, artW_px, artH_px).data,
+                artW_px, artH_px
               )
 
               if (diffBBox) {
                 const cropX = Math.max(0, diffBBox.minX - pad2)
                 const cropY = Math.max(0, diffBBox.minY - pad2)
-                const cropW = Math.min(paddedW - cropX, diffBBox.maxX - diffBBox.minX + pad2 * 2)
-                const cropH = Math.min(paddedH - cropY, diffBBox.maxY - diffBBox.minY + pad2 * 2)
+                const cropW = Math.min(artW_px - cropX, diffBBox.maxX - diffBBox.minX + pad2 * 2)
+                const cropH = Math.min(artH_px - cropY, diffBBox.maxY - diffBBox.minY + pad2 * 2)
                 applyGraphicCrop(cropX, cropY, cropW, cropH)
               } else {
                 // Fallback: render with ONLY this OCG visible, diff against blank
@@ -554,22 +540,22 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                 }
                 try { onlyCfg.setVisibility(ocgId, true) } catch { /* unsupported */ }
                 const onlyCanvas = document.createElement('canvas')
-                onlyCanvas.width = paddedW; onlyCanvas.height = paddedH
-                await page.render({ canvas: onlyCanvas, canvasContext: onlyCanvas.getContext('2d')!, viewport: paddedVp, optionalContentConfigPromise: Promise.resolve(onlyCfg) }).promise
-                const blankData = new Uint8ClampedArray(paddedW * paddedH * 4).fill(255)
+                onlyCanvas.width = artW_px; onlyCanvas.height = artH_px
+                await page.render({ canvas: onlyCanvas, canvasContext: onlyCanvas.getContext('2d')!, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(onlyCfg) }).promise
+                const blankData = new Uint8ClampedArray(artW_px * artH_px * 4).fill(255)
                 const onlyDiff = pixelDiff(
-                  onlyCanvas.getContext('2d')!.getImageData(0, 0, paddedW, paddedH).data,
-                  blankData, paddedW, paddedH, 10
+                  onlyCanvas.getContext('2d')!.getImageData(0, 0, artW_px, artH_px).data,
+                  blankData, artW_px, artH_px, 10
                 )
                 if (onlyDiff) {
                   const cropX = Math.max(0, onlyDiff.minX - pad2)
                   const cropY = Math.max(0, onlyDiff.minY - pad2)
-                  const cropW = Math.min(paddedW - cropX, onlyDiff.maxX - onlyDiff.minX + pad2 * 2)
-                  const cropH = Math.min(paddedH - cropY, onlyDiff.maxY - onlyDiff.minY + pad2 * 2)
+                  const cropW = Math.min(artW_px - cropX, onlyDiff.maxX - onlyDiff.minX + pad2 * 2)
+                  const cropH = Math.min(artH_px - cropY, onlyDiff.maxY - onlyDiff.minY + pad2 * 2)
                   applyGraphicCrop(cropX, cropY, cropW, cropH)
                 } else {
                   imageUrl = onlyCanvas.toDataURL('image/png')
-                  gx = -0.5; gy = -0.5; gw = 2; gh = 2
+                  gx = 0; gy = 0; gw = 1; gh = 1
                 }
               }
             } catch (e) {
@@ -583,8 +569,8 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             if (opBBox && opBBox.maxX > opBBox.minX && opBBox.maxY > opBBox.minY) {
               const cropX = Math.max(0, Math.floor(opBBox.minX) - pad2)
               const cropY = Math.max(0, Math.floor(opBBox.minY) - pad2)
-              const cropW = Math.min(paddedW - cropX, Math.ceil(opBBox.maxX - opBBox.minX) + pad2 * 2)
-              const cropH = Math.min(paddedH - cropY, Math.ceil(opBBox.maxY - opBBox.minY) + pad2 * 2)
+              const cropW = Math.min(artW_px - cropX, Math.ceil(opBBox.maxX - opBBox.minX) + pad2 * 2)
+              const cropH = Math.min(artH_px - cropY, Math.ceil(opBBox.maxY - opBBox.minY) + pad2 * 2)
               applyGraphicCrop(cropX, cropY, cropW, cropH)
             }
           }
