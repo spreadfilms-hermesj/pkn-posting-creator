@@ -514,69 +514,11 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             return true
           }
 
-          // ── PRIMARY: clip-intercepted overflow render ────────────────────
-          // Renders only this OCG on a padded canvas with the PDF's artboard clip
-          // skipped, so content that extends beyond the artboard is captured.
-          // In Illustrator PDFs the artboard clip is always the first clip() call.
-          const overflowPad = Math.round(200 * renderScale)
-          const overflowW = artW_px + 2 * overflowPad
-          const overflowH = artH_px + 2 * overflowPad
-          try {
-            const onlyOFCfg = await pdf.getOptionalContentConfig()
-            for (const { id: eid, isOCG: eidIsOCG } of allOCGs) {
-              if (eidIsOCG) try { onlyOFCfg.setVisibility(eid, false) } catch { /* unsupported */ }
-            }
-            try { onlyOFCfg.setVisibility(ocgId, true) } catch { /* unsupported */ }
-
-            const overflowCanvas = document.createElement('canvas')
-            overflowCanvas.width = overflowW; overflowCanvas.height = overflowH
-            const overflowCtx = overflowCanvas.getContext('2d')!
-
-            // White background so diff-vs-white detects element pixels
-            overflowCtx.fillStyle = '#ffffff'
-            overflowCtx.fillRect(0, 0, overflowW, overflowH)
-
-            // Shift artboard content to centre of the larger canvas
-            overflowCtx.translate(overflowPad, overflowPad)
-
-            // Intercept the first clip() call (the artboard boundary clip from Illustrator)
-            let firstClipSkipped = false
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            ;(overflowCtx as any).clip = function(...args: unknown[]) {
-              if (!firstClipSkipped) {
-                firstClipSkipped = true
-                overflowCtx.beginPath() // discard the pending artboard rect path
-                return
-              }
-              CanvasRenderingContext2D.prototype.clip.apply(overflowCtx, args as Parameters<CanvasRenderingContext2D['clip']>)
-            }
-
-            await page.render({
-              canvas: overflowCanvas, canvasContext: overflowCtx, viewport: renderVp,
-              optionalContentConfigPromise: Promise.resolve(onlyOFCfg),
-            }).promise
-
-            // Reset transform before getImageData (always in pixel space)
-            overflowCtx.setTransform(1, 0, 0, 1, 0, 0)
-
-            const whiteData = new Uint8ClampedArray(overflowW * overflowH * 4).fill(255)
-            const ofDiff = pixelDiff(
-              overflowCtx.getImageData(0, 0, overflowW, overflowH).data,
-              whiteData, overflowW, overflowH, 15
-            )
-            if (ofDiff) {
-              const cropX = Math.max(0, ofDiff.minX - pad2)
-              const cropY = Math.max(0, ofDiff.minY - pad2)
-              const cropW = Math.min(overflowW - cropX, ofDiff.maxX - ofDiff.minX + pad2 * 2)
-              const cropH = Math.min(overflowH - cropY, ofDiff.maxY - ofDiff.minY + pad2 * 2)
-              applyGraphicCropFrom(overflowCanvas, cropX, cropY, cropW, cropH, overflowPad, overflowPad)
-            }
-          } catch (e) {
-            console.warn(`[AI Import] Overflow capture failed for "${layerName}":`, e)
-          }
-
-          // ── FALLBACK: artboard-only pixel-diff for registered OCGs ───────
-          if (!imageUrl && ocgIsRegistered) {
+          // ── Step 1: Get artboard-clipped bbox via pixel-diff ────────────
+          // First diff with artboard to find where the element sits inside the canvas.
+          // This bbox is used to restrict the overflow search to the element's y/x range.
+          let artBBox: { minX: number; minY: number; maxX: number; maxY: number } | null = null
+          if (ocgIsRegistered) {
             try {
               const withoutCfg = await pdf.getOptionalContentConfig()
               for (const { id: eid, isOCG: eidIsOCG } of effectiveOCGs) {
@@ -585,48 +527,153 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
               const withoutCanvas = document.createElement('canvas')
               withoutCanvas.width = artW_px; withoutCanvas.height = artH_px
               await page.render({ canvas: withoutCanvas, canvasContext: withoutCanvas.getContext('2d')!, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
-
-              const diffBBox = pixelDiff(
+              const d = pixelDiff(
                 fullCtx.getImageData(0, 0, artW_px, artH_px).data,
                 withoutCanvas.getContext('2d')!.getImageData(0, 0, artW_px, artH_px).data,
                 artW_px, artH_px
               )
-
-              if (diffBBox) {
-                const cropX = Math.max(0, diffBBox.minX - pad2)
-                const cropY = Math.max(0, diffBBox.minY - pad2)
-                const cropW = Math.min(artW_px - cropX, diffBBox.maxX - diffBBox.minX + pad2 * 2)
-                const cropH = Math.min(artH_px - cropY, diffBBox.maxY - diffBBox.minY + pad2 * 2)
-                applyGraphicCropFrom(fullCanvas, cropX, cropY, cropW, cropH, 0, 0)
-              } else {
-                // Fallback: render with ONLY this OCG visible, diff against blank
-                const onlyCfg = await pdf.getOptionalContentConfig()
-                for (const { id: eid, isOCG: eidIsOCG } of allOCGs) {
-                  if (eidIsOCG) try { onlyCfg.setVisibility(eid, false) } catch { /* unsupported */ }
-                }
-                try { onlyCfg.setVisibility(ocgId, true) } catch { /* unsupported */ }
-                const onlyCanvas = document.createElement('canvas')
-                onlyCanvas.width = artW_px; onlyCanvas.height = artH_px
-                await page.render({ canvas: onlyCanvas, canvasContext: onlyCanvas.getContext('2d')!, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(onlyCfg) }).promise
-                const blankData = new Uint8ClampedArray(artW_px * artH_px * 4).fill(255)
-                const onlyDiff = pixelDiff(
-                  onlyCanvas.getContext('2d')!.getImageData(0, 0, artW_px, artH_px).data,
-                  blankData, artW_px, artH_px, 10
-                )
-                if (onlyDiff) {
-                  const cropX = Math.max(0, onlyDiff.minX - pad2)
-                  const cropY = Math.max(0, onlyDiff.minY - pad2)
-                  const cropW = Math.min(artW_px - cropX, onlyDiff.maxX - onlyDiff.minX + pad2 * 2)
-                  const cropH = Math.min(artH_px - cropY, onlyDiff.maxY - onlyDiff.minY + pad2 * 2)
-                  applyGraphicCropFrom(onlyCanvas, cropX, cropY, cropW, cropH, 0, 0)
-                } else {
-                  imageUrl = onlyCanvas.toDataURL('image/png')
-                  gx = 0; gy = 0; gw = 1; gh = 1
-                }
-              }
+              if (d) artBBox = d
             } catch (e) {
-              console.warn(`[AI Import] Graphic OCG pixel-diff failed for "${layerName}":`, e)
+              console.warn(`[AI Import] artBBox diff failed for "${layerName}":`, e)
             }
+          }
+          // For non-registered OCGs (or if withoutCanvas diff yields nothing): diff only-visible against blank
+          if (!artBBox) {
+            try {
+              const onlyCfg = await pdf.getOptionalContentConfig()
+              for (const { id: eid, isOCG: eidIsOCG } of allOCGs) {
+                if (eidIsOCG) try { onlyCfg.setVisibility(eid, false) } catch { /* unsupported */ }
+              }
+              try { onlyCfg.setVisibility(ocgId, true) } catch { /* unsupported */ }
+              const onlyCanvas = document.createElement('canvas')
+              onlyCanvas.width = artW_px; onlyCanvas.height = artH_px
+              await page.render({ canvas: onlyCanvas, canvasContext: onlyCanvas.getContext('2d')!, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(onlyCfg) }).promise
+              const blankData = new Uint8ClampedArray(artW_px * artH_px * 4).fill(255)
+              const d = pixelDiff(onlyCanvas.getContext('2d')!.getImageData(0, 0, artW_px, artH_px).data, blankData, artW_px, artH_px, 10)
+              if (d) artBBox = d
+              else { imageUrl = onlyCanvas.toDataURL('image/png'); gx = 0; gy = 0; gw = 1; gh = 1 }
+            } catch (e) {
+              console.warn(`[AI Import] artBBox only-diff failed for "${layerName}":`, e)
+            }
+          }
+
+          // ── Step 2: If bbox touches artboard boundary → narrow-band overflow ─
+          // Only search for overflow pixels in a narrow band just outside the boundary
+          // in the same y/x range as the element. This avoids capturing unrelated geometry.
+          if (!imageUrl && artBBox) {
+            const touchesRight  = artBBox.maxX >= artW_px - 4
+            const touchesLeft   = artBBox.minX <= 4
+            const touchesTop    = artBBox.minY <= 4
+            const touchesBottom = artBBox.maxY >= artH_px - 4
+
+            if (touchesRight || touchesLeft || touchesTop || touchesBottom) {
+              const overflowPad = Math.round(200 * renderScale)
+              const overflowW = artW_px + 2 * overflowPad
+              const overflowH = artH_px + 2 * overflowPad
+              try {
+                const onlyOFCfg = await pdf.getOptionalContentConfig()
+                for (const { id: eid, isOCG: eidIsOCG } of allOCGs) {
+                  if (eidIsOCG) try { onlyOFCfg.setVisibility(eid, false) } catch { /* unsupported */ }
+                }
+                try { onlyOFCfg.setVisibility(ocgId, true) } catch { /* unsupported */ }
+
+                const overflowCanvas = document.createElement('canvas')
+                overflowCanvas.width = overflowW; overflowCanvas.height = overflowH
+                const overflowCtx = overflowCanvas.getContext('2d')!
+                overflowCtx.fillStyle = '#ffffff'
+                overflowCtx.fillRect(0, 0, overflowW, overflowH)
+                overflowCtx.translate(overflowPad, overflowPad)
+
+                // Skip the first clip() — the Illustrator artboard boundary clip
+                let firstClipSkipped = false
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                ;(overflowCtx as any).clip = function(...args: unknown[]) {
+                  if (!firstClipSkipped) { firstClipSkipped = true; overflowCtx.beginPath(); return }
+                  CanvasRenderingContext2D.prototype.clip.apply(overflowCtx, args as Parameters<CanvasRenderingContext2D['clip']>)
+                }
+
+                await page.render({ canvas: overflowCanvas, canvasContext: overflowCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(onlyOFCfg) }).promise
+                overflowCtx.setTransform(1, 0, 0, 1, 0, 0)
+
+                const overflowData = overflowCtx.getImageData(0, 0, overflowW, overflowH).data
+                const margin = Math.round(20 * renderScale)
+
+                // Extended bbox in overflow canvas coords (artboard coords + overflowPad)
+                let extMinX = artBBox.minX + overflowPad
+                let extMinY = artBBox.minY + overflowPad
+                let extMaxX = artBBox.maxX + overflowPad
+                let extMaxY = artBBox.maxY + overflowPad
+                let foundOverflow = false
+
+                const isNonWhite = (idx: number) =>
+                  overflowData[idx + 3] > 10 &&
+                  (overflowData[idx] < 240 || overflowData[idx + 1] < 240 || overflowData[idx + 2] < 240)
+
+                if (touchesRight) {
+                  const bx0 = artW_px + overflowPad
+                  const bx1 = Math.min(overflowW - 1, bx0 + overflowPad)
+                  const by0 = Math.max(0, artBBox.minY + overflowPad - margin)
+                  const by1 = Math.min(overflowH - 1, artBBox.maxY + overflowPad + margin)
+                  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
+                    if (isNonWhite((y * overflowW + x) * 4)) {
+                      extMaxX = Math.max(extMaxX, x); extMinY = Math.min(extMinY, y); extMaxY = Math.max(extMaxY, y); foundOverflow = true
+                    }
+                  }
+                }
+                if (touchesLeft) {
+                  const bx1 = overflowPad
+                  const bx0 = Math.max(0, bx1 - overflowPad)
+                  const by0 = Math.max(0, artBBox.minY + overflowPad - margin)
+                  const by1 = Math.min(overflowH - 1, artBBox.maxY + overflowPad + margin)
+                  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
+                    if (isNonWhite((y * overflowW + x) * 4)) {
+                      extMinX = Math.min(extMinX, x); extMinY = Math.min(extMinY, y); extMaxY = Math.max(extMaxY, y); foundOverflow = true
+                    }
+                  }
+                }
+                if (touchesBottom) {
+                  const by0 = artH_px + overflowPad
+                  const by1 = Math.min(overflowH - 1, by0 + overflowPad)
+                  const bx0 = Math.max(0, artBBox.minX + overflowPad - margin)
+                  const bx1 = Math.min(overflowW - 1, artBBox.maxX + overflowPad + margin)
+                  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
+                    if (isNonWhite((y * overflowW + x) * 4)) {
+                      extMaxY = Math.max(extMaxY, y); extMinX = Math.min(extMinX, x); extMaxX = Math.max(extMaxX, x); foundOverflow = true
+                    }
+                  }
+                }
+                if (touchesTop) {
+                  const by1 = overflowPad
+                  const by0 = Math.max(0, by1 - overflowPad)
+                  const bx0 = Math.max(0, artBBox.minX + overflowPad - margin)
+                  const bx1 = Math.min(overflowW - 1, artBBox.maxX + overflowPad + margin)
+                  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
+                    if (isNonWhite((y * overflowW + x) * 4)) {
+                      extMinY = Math.min(extMinY, y); extMinX = Math.min(extMinX, x); extMaxX = Math.max(extMaxX, x); foundOverflow = true
+                    }
+                  }
+                }
+
+                if (foundOverflow) {
+                  const cropX = Math.max(0, extMinX - pad2)
+                  const cropY = Math.max(0, extMinY - pad2)
+                  const cropW = Math.min(overflowW - cropX, extMaxX - extMinX + pad2 * 2)
+                  const cropH = Math.min(overflowH - cropY, extMaxY - extMinY + pad2 * 2)
+                  applyGraphicCropFrom(overflowCanvas, cropX, cropY, cropW, cropH, overflowPad, overflowPad)
+                }
+              } catch (e) {
+                console.warn(`[AI Import] Overflow capture failed for "${layerName}":`, e)
+              }
+            }
+          }
+
+          // ── Step 3: No overflow found — crop from artboard canvas directly ─
+          if (!imageUrl && artBBox) {
+            const cropX = Math.max(0, artBBox.minX - pad2)
+            const cropY = Math.max(0, artBBox.minY - pad2)
+            const cropW = Math.min(artW_px - cropX, artBBox.maxX - artBBox.minX + pad2 * 2)
+            const cropH = Math.min(artH_px - cropY, artBBox.maxY - artBBox.minY + pad2 * 2)
+            applyGraphicCropFrom(fullCanvas, cropX, cropY, cropW, cropH, 0, 0)
           }
 
           // Final fallback: operator list bbox (artboard-space coords)
