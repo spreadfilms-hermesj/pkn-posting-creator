@@ -8,7 +8,7 @@ import { BrandToggles } from './brand-toggles'
 import { BrandSettingsComponent } from './brand-settings'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, ChevronUp, FileCode2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileCode2, RotateCcw } from 'lucide-react'
 
 interface CreatorSidebarProps {
   config: PostingConfig
@@ -97,12 +97,24 @@ function AIFieldItem({
       {open && (
         <div className="px-4 pb-3 space-y-2">
           {field.type !== 'graphic' && (
-            <textarea
-              value={field.value}
-              onChange={(e) => updateField({ value: e.target.value })}
-              className="w-full px-3 py-2 bg-black/30 border border-white/10 text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
-              rows={field.value.includes('\n') ? 3 : 2}
-            />
+            <div className="relative">
+              <textarea
+                value={field.value}
+                onChange={(e) => updateField({ value: e.target.value })}
+                className="w-full px-3 py-2 bg-black/30 border border-white/10 text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
+                rows={field.value.includes('\n') ? 3 : 2}
+              />
+              {field.value !== field.originalText && (
+                <button
+                  onClick={() => updateField({ value: field.originalText })}
+                  title="Auf Original zurücksetzen"
+                  className="absolute top-1.5 right-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-400 hover:text-cyan-400 hover:bg-white/10 transition-colors"
+                >
+                  <RotateCcw className="w-2.5 h-2.5" />
+                  Reset
+                </button>
+              )}
+            </div>
           )}
           {field.type === 'graphic' && !field.imageUrl && (
             <p className="text-xs text-yellow-400/80 bg-yellow-500/10 rounded px-2 py-1.5">
