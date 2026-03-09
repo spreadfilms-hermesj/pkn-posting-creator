@@ -105,24 +105,58 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const page = await pdf.getPage(artboard.pageNum)
       const vp1 = page.getViewport({ scale: 1 })
 
-      // ── Collect all OCGs + find starred ones ──────────────────────────────
+      // ── Collect all OCGs via operator list (pdfjs v5 #groups is private) ─────
+      // ocgConfig is NOT iterable in pdfjs v5. Scan operator list for OC markers
+      // instead, then use getGroup(id) to resolve names.
       const ocgConfig = await pdf.getOptionalContentConfig()
+      const firstOpList = await page.getOperatorList()
 
-      const allOCGs: { id: string; name: string }[] = []
-      const starredOCGs: { id: string; name: string }[] = []
-      try {
-        for (const entry of Array.from(ocgConfig as unknown as Iterable<[unknown, unknown]>)) {
-          const [id, group] = entry as [string, { name?: string }]
-          const name = (group as { name?: string })?.name ?? ''
-          if (name) allOCGs.push({ id, name })
-          // Match * prefix, trim whitespace, also catch leading space + *
-          if (name.trimStart().startsWith('*')) starredOCGs.push({ id, name: name.trim() })
+      // id: string ID (OCG ref like "25R", or synthetic "layer:*Grafik" for sublayers)
+      // isOCG: true = registered OCG (can use setVisibility), false = sublayer marker only
+      const allOCGs: { id: string; name: string; isOCG: boolean }[] = []
+
+      for (let j = 0; j < firstOpList.fnArray.length; j++) {
+        if (firstOpList.fnArray[j] === pdfjs.OPS.beginMarkedContentProps) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const args = firstOpList.argsArray[j] as any[]
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const props = args[1] as Record<string, any> | null
+          const tag = String(args[0] ?? '')
+
+          if (tag === 'OC' && props?.id) {
+            // Registered PDF OCG – can use setVisibility()
+            const ocgId = String(props.id)
+            if (!allOCGs.find(g => g.id === ocgId)) {
+              try {
+                const group = ocgConfig.getGroup(ocgId) as { name?: string } | null
+                allOCGs.push({ id: ocgId, name: group?.name ?? ocgId, isOCG: true })
+              } catch {
+                allOCGs.push({ id: ocgId, name: ocgId, isOCG: true })
+              }
+            }
+          } else if (props) {
+            // Illustrator sublayer marker – name stored in properties dict
+            // Illustrator encodes sublayer names as /Name key in the BDC properties
+            const layerName = String(props.Name ?? props.name ?? props.N ?? '')
+            if (layerName) {
+              const syntheticId = `layer:${layerName}`
+              if (!allOCGs.find(g => g.id === syntheticId)) {
+                allOCGs.push({ id: syntheticId, name: layerName, isOCG: false })
+              }
+            }
+          }
+
+          // Debug all markers to console
+          console.log(`[AI Import] BDC marker: tag="${tag}" id=${props?.id ?? '-'} name=${props?.Name ?? props?.name ?? '-'}`)
         }
-      } catch { /* OCG iteration not supported */ }
+      }
 
-      // Debug — open browser console to see all layer names
-      console.log('[AI Import] All OCGs:', allOCGs.map(g => `${g.id}: "${g.name}"`))
-      console.log('[AI Import] Starred OCGs:', starredOCGs)
+      const starredOCGs = allOCGs.filter(g => g.name.trimStart().startsWith('*'))
+      // If no starred OCGs (sublayers not individually exported), fall back to all
+      const effectiveOCGs = starredOCGs.length > 0 ? starredOCGs : allOCGs
+
+      console.log('[AI Import] All OCGs:', allOCGs.map(g => `${g.id} (${g.isOCG ? 'OCG' : 'layer'}): "${g.name}"`))
+      console.log('[AI Import] Effective OCGs:', effectiveOCGs.map(g => `${g.id}: "${g.name}"`))
 
       // ── Extract text content, grouped by OCG via marked content markers ────
       // getTextContent with includeMarkedContent returns both text items and
@@ -170,7 +204,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       }
 
       console.log('[AI Import] OCG text map keys:', Array.from(ocgTextMap.keys()))
-      console.log('[AI Import] Starred OCGs:', starredOCGs.map(g => `${g.id}: "${g.name}"`))
+      console.log('[AI Import] Effective OCGs:', effectiveOCGs.map(g => `${g.id}: "${g.name}"`))
 
       // Fallback: if OCG text mapping failed (no OC markers found), cluster all text
       // into positional blocks and match to text-type starred OCGs in order.
@@ -199,23 +233,30 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const renderScale = Math.max(2, 1080 / artboard.width)
       const renderVp = page.getViewport({ scale: renderScale })
 
+      // Force all effective OCGs visible for full render (some may default to hidden)
+      const fullRenderCfg = await pdf.getOptionalContentConfig()
+      for (const { id, isOCG } of effectiveOCGs) {
+        if (isOCG) try { fullRenderCfg.setVisibility(id, true) } catch { /* unsupported */ }
+      }
+
       const fullCanvas = document.createElement('canvas')
       fullCanvas.width = Math.round(renderVp.width)
       fullCanvas.height = Math.round(renderVp.height)
       const fullCtx = fullCanvas.getContext('2d')!
-      await page.render({ canvas: fullCanvas, canvasContext: fullCtx, viewport: renderVp }).promise
+      await page.render({ canvas: fullCanvas, canvasContext: fullCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(fullRenderCfg) }).promise
 
-      // ── Render background (all starred layers hidden) ─────────────────────
+      // ── Render background (all effective OCG layers hidden) ───────────────
+      const bgCfg = await pdf.getOptionalContentConfig()
+      for (const { id, isOCG } of effectiveOCGs) {
+        if (isOCG) try { bgCfg.setVisibility(id, false) } catch { /* unsupported */ }
+      }
       const bgCanvas = document.createElement('canvas')
       bgCanvas.width = fullCanvas.width
       bgCanvas.height = fullCanvas.height
       const bgCtx = bgCanvas.getContext('2d')!
-      for (const { id } of starredOCGs) {
-        try { ocgConfig.setVisibility(id, false) } catch { /* unsupported */ }
-      }
       await page.render({
         canvas: bgCanvas, canvasContext: bgCtx, viewport: renderVp,
-        optionalContentConfigPromise: Promise.resolve(ocgConfig),
+        optionalContentConfigPromise: Promise.resolve(bgCfg),
       }).promise
 
       // Helper: erase a region from bgCanvas by sampling surrounding color
@@ -255,10 +296,10 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const ocgIsText = new Map<string, boolean>()
       const ocgPathBBox = new Map<string, {minX: number, minY: number, maxX: number, maxY: number}>()
       const ocgFirstIdx = new Map<string, number>()
-      for (const { id } of starredOCGs) ocgIsText.set(id, false)
+      for (const { id } of effectiveOCGs) ocgIsText.set(id, false)
 
       try {
-        const opList = await page.getOperatorList()
+        const opList = firstOpList
         const { OPS } = pdfjs
         let mcDepth = 0
         const ocgStack: {id: string, depth: number}[] = []
@@ -281,10 +322,23 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           } else if (fn === OPS.beginMarkedContentProps) {
             mcDepth++
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const props = args[1] as {id?: string} | null
-            if (args[0] === 'OC' && props?.id && ocgIsText.has(props.id)) {
-              ocgStack.push({id: props.id, depth: mcDepth})
-              if (!ocgFirstIdx.has(props.id)) ocgFirstIdx.set(props.id, j)
+            const props = args[1] as Record<string, any> | null
+            const bTag = String(args[0] ?? '')
+            let matchedId: string | null = null
+            if (bTag === 'OC' && props?.id) {
+              const ocgId = String(props.id)
+              if (ocgIsText.has(ocgId)) matchedId = ocgId
+            } else if (props) {
+              // Illustrator sublayer: check Name key
+              const layerName = String(props.Name ?? props.name ?? props.N ?? '')
+              if (layerName) {
+                const syntheticId = `layer:${layerName}`
+                if (ocgIsText.has(syntheticId)) matchedId = syntheticId
+              }
+            }
+            if (matchedId) {
+              ocgStack.push({id: matchedId, depth: mcDepth})
+              if (!ocgFirstIdx.has(matchedId)) ocgFirstIdx.set(matchedId, j)
             }
           } else if (fn === OPS.beginMarkedContent) {
             mcDepth++
@@ -312,10 +366,16 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
               bb.minY = Math.min(bb.minY, cy2); bb.maxY = Math.max(bb.maxY, cy2)
             }
             if (fn === OPS.constructPath) {
-              const coords = args[1] as number[]
-              const ctm = ctmStack[ctmStack.length - 1]
-              for (let ci = 0; ci + 1 < coords.length; ci += 2)
-                addPoint(...applyCtm(ctm, coords[ci], coords[ci + 1]))
+              // pdfjs v5: args[2] is Float32Array([minX,minY,maxX,maxY]) in path-local space
+              // args[1] is Array([Float32Array of interleaved cmd+coords]) — NOT a flat coord list
+              const minMax = args[2] as ArrayLike<number> | null
+              if (minMax && minMax.length >= 4) {
+                const ctm = ctmStack[ctmStack.length - 1]
+                addPoint(...applyCtm(ctm, minMax[0], minMax[1]))
+                addPoint(...applyCtm(ctm, minMax[2], minMax[3]))
+                addPoint(...applyCtm(ctm, minMax[0], minMax[3]))
+                addPoint(...applyCtm(ctm, minMax[2], minMax[1]))
+              }
             } else if (fn === OPS.rectangle) {
               const [x, y, w, h] = args as number[], ctm = ctmStack[ctmStack.length - 1]
               for (const [rx, ry] of [[x,y],[x+w,y],[x,y+h],[x+w,y+h]] as [number,number][])
@@ -328,16 +388,16 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       }
 
       console.log('[AI Import] OCG text classification:', Array.from(ocgIsText.entries()).map(([id, t]) => {
-        const name = starredOCGs.find(g => g.id === id)?.name ?? id
+        const name = effectiveOCGs.find(g => g.id === id)?.name ?? id
         return `${name}: ${t ? 'TEXT' : 'GRAPHIC'}`
       }))
       console.log('[AI Import] OCG path bboxes:', Array.from(ocgPathBBox.entries()))
 
       // Separate and order OCGs
-      const textStarredOCGs = starredOCGs
+      const textStarredOCGs = effectiveOCGs
         .filter(ocg => ocgIsText.get(ocg.id) === true)
         .sort((a, b) => (ocgFirstIdx.get(a.id) ?? 0) - (ocgFirstIdx.get(b.id) ?? 0))
-      const graphicStarredOCGs = starredOCGs.filter(ocg => ocgIsText.get(ocg.id) !== true)
+      const graphicStarredOCGs = effectiveOCGs.filter(ocg => ocgIsText.get(ocg.id) !== true)
 
       console.log('[AI Import] Text OCGs (ordered):', textStarredOCGs.map(g => g.name))
       console.log('[AI Import] Graphic OCGs:', graphicStarredOCGs.map(g => g.name))
@@ -345,7 +405,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       // ── Build extracted fields ─────────────────────────────────────────────
       const extractedFields: AIEditableField[] = []
 
-      if (starredOCGs.length === 0) {
+      if (effectiveOCGs.length === 0) {
         // No OCGs found — fall back to positional text blocks
         fallbackBlocks.forEach((block, i) => {
           const sorted = [...block].sort((a, b) => a.vx - b.vx)
@@ -420,60 +480,95 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
 
         // ── Process graphic OCGs ──────────────────────────────────────────
-        for (const { id: ocgId, name: ocgRawName } of graphicStarredOCGs) {
+        for (const { id: ocgId, name: ocgRawName, isOCG: ocgIsRegistered } of graphicStarredOCGs) {
           const layerName = ocgRawName.replace(/^\s*\*/, '').trim()
           console.log(`[AI Import] Extracting graphic: "${layerName}" (${ocgId})`)
 
           let imageUrl: string | undefined
           let gx = 0.05, gy = 0.3, gw = 0.4, gh = 0.4
+          const pad2 = 16
 
-          // First: try operator list bounding box (most reliable)
-          const opBBox = ocgPathBBox.get(ocgId)
-          if (opBBox && opBBox.maxX > opBBox.minX && opBBox.maxY > opBBox.minY) {
-            const pad2 = 16
-            const cropX = Math.max(0, Math.floor(opBBox.minX) - pad2)
-            const cropY = Math.max(0, Math.floor(opBBox.minY) - pad2)
-            const cropW = Math.min(fullCanvas.width - cropX, Math.ceil(opBBox.maxX - opBBox.minX) + pad2 * 2)
-            const cropH = Math.min(fullCanvas.height - cropY, Math.ceil(opBBox.maxY - opBBox.minY) + pad2 * 2)
+          // Primary method for registered OCGs: pixel-diff (works regardless of whether
+          // the graphic uses paths, images, or any other drawing ops)
+          if (ocgIsRegistered) {
+            try {
+              // Render page with all effective OCGs visible EXCEPT this one → diff
+              // against fullCanvas to isolate exactly what this OCG contributes
+              const withoutCfg = await pdf.getOptionalContentConfig()
+              for (const { id: eid, isOCG: eidIsOCG } of effectiveOCGs) {
+                if (eidIsOCG) try { withoutCfg.setVisibility(eid, eid !== ocgId) } catch { /* unsupported */ }
+              }
+              const withoutCanvas = document.createElement('canvas')
+              withoutCanvas.width = fullCanvas.width; withoutCanvas.height = fullCanvas.height
+              await page.render({ canvas: withoutCanvas, canvasContext: withoutCanvas.getContext('2d')!, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
 
-            if (cropW > 4 && cropH > 4) {
-              // Try pixel-diff to get clean graphic (without background)
-              let usedPixelDiff = false
-              try {
-                const withoutCfg = await pdf.getOptionalContentConfig()
-                withoutCfg.setVisibility(ocgId, false)
-                const withoutCanvas = document.createElement('canvas')
-                withoutCanvas.width = fullCanvas.width; withoutCanvas.height = fullCanvas.height
-                await page.render({ canvas: withoutCanvas, canvasContext: withoutCanvas.getContext('2d')!, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
-                const diffBBox = pixelDiff(
-                  fullCtx.getImageData(0, 0, fullCanvas.width, fullCanvas.height).data,
-                  withoutCanvas.getContext('2d')!.getImageData(0, 0, withoutCanvas.width, withoutCanvas.height).data,
-                  fullCanvas.width, fullCanvas.height
+              const diffBBox = pixelDiff(
+                fullCtx.getImageData(0, 0, fullCanvas.width, fullCanvas.height).data,
+                withoutCanvas.getContext('2d')!.getImageData(0, 0, withoutCanvas.width, withoutCanvas.height).data,
+                fullCanvas.width, fullCanvas.height
+              )
+
+              if (diffBBox) {
+                const dx = Math.max(0, diffBBox.minX - pad2)
+                const dy = Math.max(0, diffBBox.minY - pad2)
+                const dw = Math.min(fullCanvas.width - dx, diffBBox.maxX - diffBBox.minX + pad2 * 2)
+                const dh = Math.min(fullCanvas.height - dy, diffBBox.maxY - diffBBox.minY + pad2 * 2)
+                const cc = document.createElement('canvas')
+                cc.width = dw; cc.height = dh
+                cc.getContext('2d')!.drawImage(fullCanvas, dx, dy, dw, dh, 0, 0, dw, dh)
+                imageUrl = cc.toDataURL('image/png')
+                gx = dx / fullCanvas.width; gy = dy / fullCanvas.height
+                gw = dw / fullCanvas.width; gh = dh / fullCanvas.height
+                paintOver(dx, dy, dw, dh)
+              } else {
+                // setVisibility may not be hiding it — try rendering with ONLY this OCG
+                // visible to isolate the graphic
+                const onlyCfg = await pdf.getOptionalContentConfig()
+                for (const { id: eid, isOCG: eidIsOCG } of allOCGs) {
+                  if (eidIsOCG) try { onlyCfg.setVisibility(eid, false) } catch { /* unsupported */ }
+                }
+                try { onlyCfg.setVisibility(ocgId, true) } catch { /* unsupported */ }
+                const onlyCanvas = document.createElement('canvas')
+                onlyCanvas.width = fullCanvas.width; onlyCanvas.height = fullCanvas.height
+                await page.render({ canvas: onlyCanvas, canvasContext: onlyCanvas.getContext('2d')!, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(onlyCfg) }).promise
+                // Diff isolated render against blank white to find where the graphic actually is
+                const blankData = new Uint8ClampedArray(fullCanvas.width * fullCanvas.height * 4).fill(255)
+                const onlyDiff = pixelDiff(
+                  onlyCanvas.getContext('2d')!.getImageData(0, 0, onlyCanvas.width, onlyCanvas.height).data,
+                  blankData, onlyCanvas.width, onlyCanvas.height, 10
                 )
-                if (diffBBox) {
-                  const dx = Math.max(0, diffBBox.minX - pad2)
-                  const dy = Math.max(0, diffBBox.minY - pad2)
-                  const dw = Math.min(fullCanvas.width - dx, diffBBox.maxX - diffBBox.minX + pad2 * 2)
-                  const dh = Math.min(fullCanvas.height - dy, diffBBox.maxY - diffBBox.minY + pad2 * 2)
+                if (onlyDiff) {
+                  const dx = Math.max(0, onlyDiff.minX - pad2)
+                  const dy = Math.max(0, onlyDiff.minY - pad2)
+                  const dw = Math.min(fullCanvas.width - dx, onlyDiff.maxX - onlyDiff.minX + pad2 * 2)
+                  const dh = Math.min(fullCanvas.height - dy, onlyDiff.maxY - onlyDiff.minY + pad2 * 2)
                   const cc = document.createElement('canvas')
                   cc.width = dw; cc.height = dh
-                  cc.getContext('2d')!.drawImage(withoutCanvas, dx, dy, dw, dh, 0, 0, dw, dh)
-                  // Overlay full canvas on top to get the graphic with correct colors
                   cc.getContext('2d')!.drawImage(fullCanvas, dx, dy, dw, dh, 0, 0, dw, dh)
-                  // Actually, just use the full canvas region
-                  const cc2 = document.createElement('canvas')
-                  cc2.width = dw; cc2.height = dh
-                  cc2.getContext('2d')!.drawImage(fullCanvas, dx, dy, dw, dh, 0, 0, dw, dh)
-                  imageUrl = cc2.toDataURL('image/png')
+                  imageUrl = cc.toDataURL('image/png')
                   gx = dx / fullCanvas.width; gy = dy / fullCanvas.height
                   gw = dw / fullCanvas.width; gh = dh / fullCanvas.height
                   paintOver(dx, dy, dw, dh)
-                  usedPixelDiff = true
+                } else {
+                  // Last resort: use full isolated render at full artboard size
+                  imageUrl = onlyCanvas.toDataURL('image/png')
+                  gx = 0; gy = 0; gw = 1; gh = 1
                 }
-              } catch { /* setVisibility not supported */ }
+              }
+            } catch (e) {
+              console.warn(`[AI Import] Graphic OCG pixel-diff failed for "${layerName}":`, e)
+            }
+          }
 
-              if (!usedPixelDiff) {
-                // Fallback: crop directly from full render using operator list bbox
+          // Fallback for non-registered OCGs or if pixel-diff failed: operator list bbox crop
+          if (!imageUrl) {
+            const opBBox = ocgPathBBox.get(ocgId)
+            if (opBBox && opBBox.maxX > opBBox.minX && opBBox.maxY > opBBox.minY) {
+              const cropX = Math.max(0, Math.floor(opBBox.minX) - pad2)
+              const cropY = Math.max(0, Math.floor(opBBox.minY) - pad2)
+              const cropW = Math.min(fullCanvas.width - cropX, Math.ceil(opBBox.maxX - opBBox.minX) + pad2 * 2)
+              const cropH = Math.min(fullCanvas.height - cropY, Math.ceil(opBBox.maxY - opBBox.minY) + pad2 * 2)
+              if (cropW > 4 && cropH > 4) {
                 const cc = document.createElement('canvas')
                 cc.width = cropW; cc.height = cropH
                 cc.getContext('2d')!.drawImage(fullCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
@@ -677,14 +772,27 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                         <div key={i}>
                           <Label className="text-gray-300 flex items-center gap-2 mb-2">
                             <span className="text-cyan-400 text-xs bg-cyan-500/20 px-2 py-0.5 rounded font-mono">*{field.layerName}</span>
-                            <span className="text-xs text-gray-500">Layer</span>
+                            <span className="text-xs text-gray-500">{field.type === 'graphic' ? 'Grafik-Layer' : 'Text-Layer'}</span>
                           </Label>
-                          <textarea
-                            value={field.value}
-                            onChange={(e) => updateFieldValue(i, e.target.value)}
-                            className="w-full px-3 py-2 bg-white/5 border border-white/20 text-white rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none"
-                            rows={field.value.includes('\n') ? 3 : 2}
-                          />
+                          {field.type === 'graphic' ? (
+                            field.imageUrl ? (
+                              <div className="bg-black/30 rounded-lg border border-white/10 p-2 flex justify-center">
+                                {/* eslint-disable-next-line @next/next/no-img-element */}
+                                <img src={field.imageUrl} alt={field.layerName} className="max-h-32 object-contain rounded" />
+                              </div>
+                            ) : (
+                              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 text-xs text-yellow-300">
+                                Grafik konnte nicht extrahiert werden — wird als Platzhalter importiert.
+                              </div>
+                            )
+                          ) : (
+                            <textarea
+                              value={field.value}
+                              onChange={(e) => updateFieldValue(i, e.target.value)}
+                              className="w-full px-3 py-2 bg-white/5 border border-white/20 text-white rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-cyan-500 resize-none"
+                              rows={field.value.includes('\n') ? 3 : 2}
+                            />
+                          )}
                         </div>
                       ))}
                     </div>
