@@ -8,7 +8,7 @@ import { BrandToggles } from './brand-toggles'
 import { BrandSettingsComponent } from './brand-settings'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, ChevronUp, FileCode2, RotateCcw } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileCode2 } from 'lucide-react'
 
 interface CreatorSidebarProps {
   config: PostingConfig
@@ -64,6 +64,8 @@ function AIFieldItem({
 }) {
   const [open, setOpen] = useState(true)
   const ref = React.useRef<HTMLDivElement>(null)
+  const undoStack = React.useRef<string[]>([field.value])
+  const undoIndex = React.useRef(0)
 
   React.useEffect(() => {
     if (isSelected) {
@@ -77,6 +79,39 @@ function AIFieldItem({
       fi === index ? { ...f, ...updates } : f
     )
     updateConfig({ aiImport: { ...aiImport, editableFields: updated } })
+  }
+
+  const handleTextChange = (newValue: string) => {
+    // Trim history beyond current index (discard redo), then push new entry
+    undoStack.current = undoStack.current.slice(0, undoIndex.current + 1)
+    undoStack.current.push(newValue)
+    undoIndex.current = undoStack.current.length - 1
+    updateField({ value: newValue })
+  }
+
+  const handleTextKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'z') {
+      e.preventDefault()
+      if (undoIndex.current > 0) {
+        undoIndex.current--
+        updateField({ value: undoStack.current[undoIndex.current] })
+      }
+    }
+  }
+
+  // Shift+Arrow on number inputs steps by 1 instead of the base step
+  const handleNumericKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    current: number,
+    onUpdate: (v: number) => void,
+    shiftStep: number
+  ) => {
+    if (!e.shiftKey) return
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      e.preventDefault()
+      const delta = e.key === 'ArrowUp' ? shiftStep : -shiftStep
+      onUpdate(Math.round((current + delta) * 1000) / 1000)
+    }
   }
 
   return (
@@ -97,24 +132,13 @@ function AIFieldItem({
       {open && (
         <div className="px-4 pb-3 space-y-2">
           {field.type !== 'graphic' && (
-            <div className="relative">
-              <textarea
-                value={field.value}
-                onChange={(e) => updateField({ value: e.target.value })}
-                className="w-full px-3 py-2 bg-black/30 border border-white/10 text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
-                rows={field.value.includes('\n') ? 3 : 2}
-              />
-              {field.value !== field.originalText && (
-                <button
-                  onClick={() => updateField({ value: field.originalText })}
-                  title="Auf Original zurücksetzen"
-                  className="absolute top-1.5 right-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] text-gray-400 hover:text-cyan-400 hover:bg-white/10 transition-colors"
-                >
-                  <RotateCcw className="w-2.5 h-2.5" />
-                  Reset
-                </button>
-              )}
-            </div>
+            <textarea
+              value={field.value}
+              onChange={(e) => handleTextChange(e.target.value)}
+              onKeyDown={handleTextKeyDown}
+              className="w-full px-3 py-2 bg-black/30 border border-white/10 text-white rounded text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500 resize-none"
+              rows={field.value.includes('\n') ? 3 : 2}
+            />
           )}
           {field.type === 'graphic' && !field.imageUrl && (
             <p className="text-xs text-yellow-400/80 bg-yellow-500/10 rounded px-2 py-1.5">
@@ -128,6 +152,7 @@ function AIFieldItem({
               type="number" min={0} max={100} step={0.1}
               value={Math.round(field.x * 1000) / 10}
               onChange={(e) => updateField({ x: parseFloat(e.target.value) / 100 })}
+              onKeyDown={(e) => handleNumericKeyDown(e, Math.round(field.x * 1000) / 10, (v) => updateField({ x: Math.max(0, Math.min(100, v)) / 100 }), 1)}
               className="w-16 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
             />
             <span className="w-3 text-right shrink-0">Y</span>
@@ -135,6 +160,7 @@ function AIFieldItem({
               type="number" min={0} max={100} step={0.1}
               value={Math.round(field.y * 1000) / 10}
               onChange={(e) => updateField({ y: parseFloat(e.target.value) / 100 })}
+              onKeyDown={(e) => handleNumericKeyDown(e, Math.round(field.y * 1000) / 10, (v) => updateField({ y: Math.max(0, Math.min(100, v)) / 100 }), 1)}
               className="w-16 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
             />
             {field.type === 'graphic' ? (
@@ -144,6 +170,7 @@ function AIFieldItem({
                   type="number" min={0.1} max={5} step={0.05}
                   value={Math.round((field.scale ?? 1) * 100) / 100}
                   onChange={(e) => updateField({ scale: parseFloat(e.target.value) })}
+                  onKeyDown={(e) => handleNumericKeyDown(e, field.scale ?? 1, (v) => updateField({ scale: Math.max(0.1, Math.min(5, v)) }), 1)}
                   className="w-14 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
                 />
               </>
