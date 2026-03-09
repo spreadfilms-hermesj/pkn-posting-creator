@@ -94,8 +94,8 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
               style={{
                 transform: `scale(${mainPreview.scale})`,
                 transformOrigin: 'top left',
-                width: FORMAT_DIMENSIONS[config.format].width,
-                height: FORMAT_DIMENSIONS[config.format].height,
+                width: config.aiImport ? config.aiImport.artboardWidth : FORMAT_DIMENSIONS[config.format].width,
+                height: config.aiImport ? config.aiImport.artboardHeight : FORMAT_DIMENSIONS[config.format].height,
               }}
             >
               <PostingGraphic config={config} selectedFieldIndex={selectedFieldIndex} onSelectField={onSelectField} />
