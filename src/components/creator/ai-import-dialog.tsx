@@ -237,25 +237,11 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
       // Extended viewport: adds padding beyond the artboard in PDF units so that
       // elements which overflow the Illustrator artboard boundary are captured.
-      // We instantiate PageViewport via the existing viewport's constructor (pdfjs v5).
-      const padPdf = 300 // extra PDF-unit padding on each side
-      const padX_px = Math.round(padPdf * renderScale)
-      const padY_px = Math.round(padPdf * renderScale)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const anyVp = renderVp as any
-      let extVp = renderVp, extW = artW_px, extH = artH_px
-      try {
-        const [vx1, vy1, vx2, vy2] = anyVp.viewBox as [number, number, number, number]
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        extVp = new (renderVp.constructor as any)({
-          viewBox: [vx1 - padPdf, vy1 - padPdf, vx2 + padPdf, vy2 + padPdf],
-          scale: renderScale, rotation: 0, dontFlip: false,
-        })
-        extW = Math.round(extVp.width)
-        extH = Math.round(extVp.height)
-      } catch {
-        // PageViewport constructor not available — fall back to artboard-only rendering
-      }
+      // padX_px/padY_px start at 0 (artboard-only) and are only set to non-zero if
+      // the extended render actually succeeds.
+      let padX_px = 0, padY_px = 0
+      let extVp: typeof renderVp = renderVp
+      let extW = artW_px, extH = artH_px
 
       // Force all effective OCGs visible for full render (some may default to hidden)
       const fullRenderCfg = await pdf.getOptionalContentConfig()
@@ -263,12 +249,45 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         if (isOCG) try { fullRenderCfg.setVisibility(id, true) } catch { /* unsupported */ }
       }
 
-      // fullCanvas uses the extended viewport — captures content outside artboard bounds
-      const fullCanvas = document.createElement('canvas')
-      fullCanvas.width = extW
-      fullCanvas.height = extH
-      const fullCtx = fullCanvas.getContext('2d')!
-      await page.render({ canvas: fullCanvas, canvasContext: fullCtx, viewport: extVp, optionalContentConfigPromise: Promise.resolve(fullRenderCfg) }).promise
+      // Try to build a padded viewport via PageViewport constructor, then render.
+      // If anything fails at any step, fall back silently to artboard-only rendering.
+      let fullCanvas = document.createElement('canvas')
+      let fullCtx: CanvasRenderingContext2D = fullCanvas.getContext('2d')!
+      let extendedRenderOk = false
+      try {
+        const padPdf = 300 // extra PDF-space units on each side
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const anyVp = renderVp as any
+        const [vx1, vy1, vx2, vy2] = anyVp.viewBox as [number, number, number, number]
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const newVp = new (renderVp.constructor as any)({
+          viewBox: [vx1 - padPdf, vy1 - padPdf, vx2 + padPdf, vy2 + padPdf],
+          scale: renderScale, rotation: 0, dontFlip: false,
+        })
+        const newW = Math.round(newVp.width)
+        const newH = Math.round(newVp.height)
+        if (newW > artW_px && newH > artH_px && newW < artW_px * 4) {
+          // Render extended canvas
+          fullCanvas.width = newW
+          fullCanvas.height = newH
+          fullCtx = fullCanvas.getContext('2d')!
+          await page.render({ canvas: fullCanvas, canvasContext: fullCtx, viewport: newVp, optionalContentConfigPromise: Promise.resolve(fullRenderCfg) }).promise
+          extVp = newVp; extW = newW; extH = newH
+          padX_px = Math.round(padPdf * renderScale)
+          padY_px = Math.round(padPdf * renderScale)
+          extendedRenderOk = true
+        }
+      } catch (e) {
+        console.warn('[AI Import] Extended viewport render failed, falling back to artboard size:', e)
+      }
+      if (!extendedRenderOk) {
+        // Artboard-only fallback — padX_px/padY_px remain 0
+        fullCanvas = document.createElement('canvas')
+        fullCanvas.width = artW_px
+        fullCanvas.height = artH_px
+        fullCtx = fullCanvas.getContext('2d')!
+        await page.render({ canvas: fullCanvas, canvasContext: fullCtx!, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(fullRenderCfg) }).promise
+      }
 
       // ── Render background (all effective OCG layers hidden) ───────────────
       // bgCanvas is artboard-sized only — used as the displayed background image
@@ -583,7 +602,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                   applyGraphicCrop(cropX, cropY, cropW, cropH)
                 } else {
                   imageUrl = onlyCanvas.toDataURL('image/png')
-                  gx = -padPdf / artboard.width; gy = -padPdf / artboard.height
+                  gx = -padX_px / artW_px; gy = -padY_px / artH_px
                   gw = extW / artW_px; gh = extH / artH_px
                 }
               }
