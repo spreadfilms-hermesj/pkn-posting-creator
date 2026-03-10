@@ -482,8 +482,88 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           })
         }
 
+        // ── Pre-render baselines for graphic isolation ────────────────────
+        // Rendering with background:'transparent' breaks PDF transparency groups
+        // (used by Illustrator for gradients) because they composite against the
+        // current backdrop. Instead we render each element on white (correct
+        // compositing) and diff against an all-hidden white baseline to isolate
+        // element pixels with their true colors — including gradient fills/strokes.
+
+        // Config: all OCGs hidden (shared across all graphic elements)
+        const allHiddenGfxCfg = await pdf.getOptionalContentConfig()
+        for (const { id: eid, isOCG: eIsOCG } of allOCGs) {
+          if (eIsOCG) try { allHiddenGfxCfg.setVisibility(eid, false) } catch { /* unsupported */ }
+        }
+
+        // Artboard-size baseline (white background, all hidden)
+        let artboardBaselineData: Uint8ClampedArray | null = null
+        try {
+          const blCanvas = document.createElement('canvas')
+          blCanvas.width = artW_px; blCanvas.height = artH_px
+          const blCtx = blCanvas.getContext('2d', { willReadFrequently: true })!
+          await page.render({ canvas: blCanvas, canvasContext: blCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(allHiddenGfxCfg) }).promise
+          artboardBaselineData = blCtx.getImageData(0, 0, artW_px, artH_px).data.slice()
+        } catch (e) {
+          console.warn('[AI Import] Artboard baseline render failed:', e)
+        }
+
+        // Overflow-size baseline (white pre-fill, all hidden, clip skipped)
+        const ofPad = Math.round(200 * renderScale)
+        const ofW = artW_px + 2 * ofPad
+        const ofH = artH_px + 2 * ofPad
+        let ofBaselineData: Uint8ClampedArray | null = null
+        try {
+          const ofBlCanvas = document.createElement('canvas')
+          ofBlCanvas.width = ofW; ofBlCanvas.height = ofH
+          const ofBlCtx = ofBlCanvas.getContext('2d', { willReadFrequently: true })!
+          ofBlCtx.fillStyle = '#ffffff'
+          ofBlCtx.fillRect(0, 0, ofW, ofH)
+          ofBlCtx.translate(ofPad, ofPad)
+          let ofBlClip = false
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          ;(ofBlCtx as any).clip = function(...a: unknown[]) {
+            if (!ofBlClip) { ofBlClip = true; ofBlCtx.beginPath(); return }
+            CanvasRenderingContext2D.prototype.clip.apply(ofBlCtx, a as Parameters<CanvasRenderingContext2D['clip']>)
+          }
+          await page.render({ canvas: ofBlCanvas, canvasContext: ofBlCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(allHiddenGfxCfg) }).promise
+          ofBlCtx.setTransform(1, 0, 0, 1, 0, 0)
+          ofBaselineData = ofBlCtx.getImageData(0, 0, ofW, ofH).data.slice()
+        } catch (e) {
+          console.warn('[AI Import] Overflow baseline render failed:', e)
+        }
+
+        // Helper: pixel-diff two white-background renders → isolated element canvas
+        // Pixels that differ from baseline are element pixels (opaque, correct colors).
+        // Pixels matching baseline → transparent. Handles gradients correctly.
+        const diffToIsolated = (
+          elemData: Uint8ClampedArray, baseData: Uint8ClampedArray, w: number, h: number
+        ): { canvas: HTMLCanvasElement; bbox: { minX: number; minY: number; maxX: number; maxY: number } | null } => {
+          const c = document.createElement('canvas')
+          c.width = w; c.height = h
+          const ctx = c.getContext('2d')!
+          const img = ctx.createImageData(w, h)
+          const d = img.data
+          let minX = w, minY = h, maxX = -1, maxY = -1
+          for (let y = 0; y < h; y++) {
+            for (let x = 0; x < w; x++) {
+              const idx = (y * w + x) * 4
+              const diff = Math.abs(elemData[idx] - baseData[idx])
+                + Math.abs(elemData[idx + 1] - baseData[idx + 1])
+                + Math.abs(elemData[idx + 2] - baseData[idx + 2])
+              if (diff > 8) {
+                d[idx] = elemData[idx]; d[idx + 1] = elemData[idx + 1]
+                d[idx + 2] = elemData[idx + 2]; d[idx + 3] = 255
+                if (x < minX) minX = x; if (x > maxX) maxX = x
+                if (y < minY) minY = y; if (y > maxY) maxY = y
+              }
+            }
+          }
+          ctx.putImageData(img, 0, 0)
+          return { canvas: c, bbox: maxX >= minX && maxY >= minY ? { minX, minY, maxX, maxY } : null }
+        }
+
         // ── Process graphic OCGs ──────────────────────────────────────────
-        for (const { id: ocgId, name: ocgRawName, isOCG: ocgIsRegistered } of graphicStarredOCGs) {
+        for (const { id: ocgId, name: ocgRawName } of graphicStarredOCGs) {
           const layerName = ocgRawName.replace(/^\s*\*/, '').trim()
           console.log(`[AI Import] Extracting graphic: "${layerName}" (${ocgId})`)
 
@@ -491,8 +571,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           let gx = 0.05, gy = 0.3, gw = 0.4, gh = 0.4
           const pad2 = 16
 
-          // Helper: crop a rect from an artboard-sized canvas, set normalized position.
-          // offsetX/offsetY: how far the artboard origin is shifted in the source canvas.
+          // Helper: crop a rect from a canvas, set normalized position.
           const applyGraphicCropFrom = (
             srcCanvas: HTMLCanvasElement, cropX: number, cropY: number, cropW: number, cropH: number,
             offsetX: number, offsetY: number
@@ -514,44 +593,32 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             return true
           }
 
-          // ── Render only this OCG with transparent background ─────────────
-          // Like copy-paste from Illustrator into another app: the element is
-          // isolated on transparency so no background bleeds through.
-          // We hide all other OCGs and render with background:'transparent',
-          // then scan for non-transparent pixels to find the true bbox.
+          // Isolation config: hide all, show only this OCG
           const isolateCfg = await pdf.getOptionalContentConfig()
           for (const { id: eid, isOCG: eidIsOCG } of allOCGs) {
             if (eidIsOCG) try { isolateCfg.setVisibility(eid, false) } catch { /* unsupported */ }
           }
           try { isolateCfg.setVisibility(ocgId, true) } catch { /* unsupported */ }
 
-          // Helper: find bbox of non-transparent pixels in ImageData
-          const alphaBBox = (data: Uint8ClampedArray, w: number, h: number) => {
-            let minX = w, minY = h, maxX = -1, maxY = -1
-            for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-              if (data[(y * w + x) * 4 + 3] > 10) {
-                if (x < minX) minX = x; if (x > maxX) maxX = x
-                if (y < minY) minY = y; if (y > maxY) maxY = y
-              }
-            }
-            return maxX >= minX && maxY >= minY ? { minX, minY, maxX, maxY } : null
-          }
-
-          // Step 1 — render only this OCG at artboard size, transparent bg
+          // Step 1 — render element on white, diff against baseline → correct RGBA
+          // This is the key fix for gradients: white background gives correct
+          // transparency-group compositing; the diff removes the background.
           let baseCanvas: HTMLCanvasElement | null = null
           let artBBox: { minX: number; minY: number; maxX: number; maxY: number } | null = null
           try {
-            baseCanvas = document.createElement('canvas')
-            baseCanvas.width = artW_px; baseCanvas.height = artH_px
-            const baseCtx = baseCanvas.getContext('2d', { willReadFrequently: true })!
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await page.render({ canvas: baseCanvas, canvasContext: baseCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(isolateCfg), background: 'transparent' as any }).promise
-            artBBox = alphaBBox(baseCtx.getImageData(0, 0, artW_px, artH_px).data, artW_px, artH_px)
+            const elemCanvas = document.createElement('canvas')
+            elemCanvas.width = artW_px; elemCanvas.height = artH_px
+            const elemCtx = elemCanvas.getContext('2d', { willReadFrequently: true })!
+            await page.render({ canvas: elemCanvas, canvasContext: elemCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(isolateCfg) }).promise
+            const elemData = elemCtx.getImageData(0, 0, artW_px, artH_px).data
+            const baseline = artboardBaselineData ?? new Uint8ClampedArray(artW_px * artH_px * 4).fill(255)
+            const { canvas, bbox } = diffToIsolated(elemData, baseline, artW_px, artH_px)
+            baseCanvas = canvas; artBBox = bbox
           } catch (e) {
             console.warn(`[AI Import] Isolated render failed for "${layerName}":`, e)
           }
 
-          // Step 2 — if bbox touches a boundary, try overflow capture on padded canvas
+          // Step 2 — if bbox touches a boundary, capture overflow on padded canvas
           if (!imageUrl && artBBox) {
             const touchesRight  = artBBox.maxX >= artW_px - 4
             const touchesLeft   = artBBox.minX <= 4
@@ -559,15 +626,17 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             const touchesBottom = artBBox.maxY >= artH_px - 4
 
             if (touchesRight || touchesLeft || touchesTop || touchesBottom) {
-              const overflowPad = Math.round(200 * renderScale)
-              const overflowW = artW_px + 2 * overflowPad
-              const overflowH = artH_px + 2 * overflowPad
+              const overflowPad = ofPad
+              const overflowW = ofW
+              const overflowH = ofH
               try {
                 const overflowCanvas = document.createElement('canvas')
                 overflowCanvas.width = overflowW; overflowCanvas.height = overflowH
                 const overflowCtx = overflowCanvas.getContext('2d', { willReadFrequently: true })!
+                // Pre-fill white so gradient compositing is correct in overflow zone
+                overflowCtx.fillStyle = '#ffffff'
+                overflowCtx.fillRect(0, 0, overflowW, overflowH)
                 overflowCtx.translate(overflowPad, overflowPad)
-
                 // Skip the first clip() — the Illustrator artboard boundary clip
                 let firstClipSkipped = false
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -575,17 +644,19 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                   if (!firstClipSkipped) { firstClipSkipped = true; overflowCtx.beginPath(); return }
                   CanvasRenderingContext2D.prototype.clip.apply(overflowCtx, args as Parameters<CanvasRenderingContext2D['clip']>)
                 }
-
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                await page.render({ canvas: overflowCanvas, canvasContext: overflowCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(isolateCfg), background: 'transparent' as any }).promise
+                await page.render({ canvas: overflowCanvas, canvasContext: overflowCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(isolateCfg) }).promise
                 overflowCtx.setTransform(1, 0, 0, 1, 0, 0)
 
-                const overflowData = overflowCtx.getImageData(0, 0, overflowW, overflowH).data
-                const margin = Math.round(20 * renderScale)
-                const isVisible = (idx: number) => overflowData[idx + 3] > 10
+                const overflowElemData = overflowCtx.getImageData(0, 0, overflowW, overflowH).data
+                const ofBase = ofBaselineData ?? new Uint8ClampedArray(overflowW * overflowH * 4).fill(255)
 
-                // Extend artboard bbox with any overflow pixels found in narrow band
-                // outside the specific boundary, restricted to element's y/x range
+                // Build isolated overflow canvas (correct gradient colors via diff)
+                const { canvas: resultOFCanvas } = diffToIsolated(overflowElemData, ofBase, overflowW, overflowH)
+                const resultData = resultOFCanvas.getContext('2d', { willReadFrequently: true })!
+                  .getImageData(0, 0, overflowW, overflowH).data
+                const isVisible = (idx: number) => resultData[idx + 3] > 10
+
+                const margin = Math.round(20 * renderScale)
                 let extMinX = artBBox.minX + overflowPad
                 let extMinY = artBBox.minY + overflowPad
                 let extMaxX = artBBox.maxX + overflowPad
@@ -642,7 +713,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                   const cropY = Math.max(0, extMinY - pad2)
                   const cropW = Math.min(overflowW - cropX, extMaxX - extMinX + pad2 * 2)
                   const cropH = Math.min(overflowH - cropY, extMaxY - extMinY + pad2 * 2)
-                  applyGraphicCropFrom(overflowCanvas, cropX, cropY, cropW, cropH, overflowPad, overflowPad)
+                  applyGraphicCropFrom(resultOFCanvas, cropX, cropY, cropW, cropH, overflowPad, overflowPad)
                 }
               } catch (e) {
                 console.warn(`[AI Import] Overflow capture failed for "${layerName}":`, e)
@@ -650,8 +721,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             }
           }
 
-          // Step 3 — no overflow found, or element is fully inside artboard:
-          // crop from the isolated transparent baseCanvas
+          // Step 3 — element fully inside artboard: crop from isolated baseCanvas
           if (!imageUrl && artBBox && baseCanvas) {
             const cropX = Math.max(0, artBBox.minX - pad2)
             const cropY = Math.max(0, artBBox.minY - pad2)
