@@ -299,13 +299,20 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const ocgIsText = new Map<string, boolean>()
       const ocgPathBBox = new Map<string, {minX: number, minY: number, maxX: number, maxY: number}>()
       const ocgFirstIdx = new Map<string, number>()
+      // ocgHasImage: true if the OCG contains raster image XObject operators
+      const ocgHasImage = new Map<string, boolean>()
+      // ocgParentId: for isOCG:false sublayers, the nearest parent registered OCG id
+      const ocgParentId = new Map<string, string>()
       for (const { id } of effectiveOCGs) ocgIsText.set(id, false)
 
       try {
         const opList = firstOpList
         const { OPS } = pdfjs
         let mcDepth = 0
-        const ocgStack: {id: string, depth: number}[] = []
+        // isRegistered: true = real OCG (setVisibility works), false = sublayer marker
+        const ocgStack: {id: string, depth: number, isRegistered: boolean}[] = []
+        // stack of currently open registered OCG ids (to find parent for sublayers)
+        const registeredOCGStack: string[] = []
         const ctmStack: number[][] = [[1, 0, 0, 1, 0, 0]]
         const applyCtm = (m: number[], x: number, y: number): [number, number] =>
           [m[0]*x + m[2]*y + m[4], m[1]*x + m[3]*y + m[5]]
@@ -328,25 +335,39 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             const props = args[1] as Record<string, any> | null
             const bTag = String(args[0] ?? '')
             let matchedId: string | null = null
+            let isRegisteredOCG = false
             if (bTag === 'OC' && props?.id) {
               const ocgId = String(props.id)
-              if (ocgIsText.has(ocgId)) matchedId = ocgId
+              if (ocgIsText.has(ocgId)) { matchedId = ocgId; isRegisteredOCG = true }
             } else if (props) {
               // Illustrator sublayer: check Name key
               const layerName = String(props.Name ?? props.name ?? props.N ?? '')
               if (layerName) {
                 const syntheticId = `layer:${layerName}`
-                if (ocgIsText.has(syntheticId)) matchedId = syntheticId
+                if (ocgIsText.has(syntheticId)) {
+                  matchedId = syntheticId
+                  // Record the nearest parent registered OCG
+                  if (registeredOCGStack.length > 0 && !ocgParentId.has(syntheticId)) {
+                    ocgParentId.set(syntheticId, registeredOCGStack[registeredOCGStack.length - 1])
+                  }
+                }
               }
             }
             if (matchedId) {
-              ocgStack.push({id: matchedId, depth: mcDepth})
+              ocgStack.push({id: matchedId, depth: mcDepth, isRegistered: isRegisteredOCG})
+              if (isRegisteredOCG) registeredOCGStack.push(matchedId)
               if (!ocgFirstIdx.has(matchedId)) ocgFirstIdx.set(matchedId, j)
             }
           } else if (fn === OPS.beginMarkedContent) {
             mcDepth++
           } else if (fn === OPS.endMarkedContent) {
-            if (ocgStack.length > 0 && ocgStack[ocgStack.length - 1].depth === mcDepth) ocgStack.pop()
+            if (ocgStack.length > 0 && ocgStack[ocgStack.length - 1].depth === mcDepth) {
+              const popped = ocgStack.pop()!
+              if (popped.isRegistered) {
+                const ri = registeredOCGStack.lastIndexOf(popped.id)
+                if (ri >= 0) registeredOCGStack.splice(ri, 1)
+              }
+            }
             mcDepth = Math.max(0, mcDepth - 1)
           }
 
@@ -356,6 +377,12 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           if (fn === OPS.showText || fn === OPS.showSpacedText ||
               fn === OPS.nextLineShowText || fn === OPS.nextLineSetSpacingShowText) {
             ocgIsText.set(inOCG, true)
+          }
+
+          // Detect raster image XObject operators
+          if (fn === OPS.paintImageXObject || fn === OPS.paintInlineImageXObject ||
+              fn === OPS.paintImageMaskXObject || fn === OPS.paintImageXObjectRepeat) {
+            ocgHasImage.set(inOCG, true)
           }
 
           // Track path coordinates for graphic OCGs (bounding box)
@@ -394,6 +421,8 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         const name = effectiveOCGs.find(g => g.id === id)?.name ?? id
         return `${name}: ${t ? 'TEXT' : 'GRAPHIC'}`
       }))
+      console.log('[AI Import] OCG has-image:', Array.from(ocgHasImage.entries()).map(([id, v]) => `${effectiveOCGs.find(g=>g.id===id)?.name ?? id}: ${v}`))
+      console.log('[AI Import] OCG parent ids:', Array.from(ocgParentId.entries()))
       console.log('[AI Import] OCG path bboxes:', Array.from(ocgPathBBox.entries()))
 
       // Separate and order OCGs
@@ -564,12 +593,29 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             return true
           }
 
-          // Step 1 — Solo-vs-none diff: render with only this OCG vs all OCGs hidden.
-          // Both renders share identical non-OCG page content, so the diff is exactly
-          // this OCG's pixels — no bleed from other layers, no transparency issues.
+          // Step 1 — Extract this graphic layer using the best diff strategy:
+          //
+          // • Raster image layers (hasImage=true) OR isOCG:false sublayers with a parent:
+          //   → Solo-vs-none diff: render only this OCG vs all hidden.
+          //     Isolates the raster from other elements without bleed.
+          //
+          // • Vector / gradient layers (hasImage=false, isOCG:true):
+          //   → Full-vs-without diff: render all OCGs vs all except this one.
+          //     Gradient fills use PDF sh operators that clip to the CURRENT clipping
+          //     region. In solo-only mode the clip is the full canvas, flooding it.
+          //     Full render preserves the clip context so gradients stay bounded.
+          const hasImage = ocgHasImage.get(ocgId) ?? false
+          const parentId = ocgParentId.get(ocgId) ?? null
+          // The effective registered OCG id we can call setVisibility on:
+          // • for registered OCGs: use ocgId directly
+          // • for isOCG:false sublayers: use their parent registered OCG (if known)
+          const visId = ocgIsRegistered ? ocgId : parentId
+
           let baseCanvas: HTMLCanvasElement | null = null
           let artBBox: { minX: number; minY: number; maxX: number; maxY: number } | null = null
-          if (ocgIsRegistered) {
+
+          if (visId && (hasImage || !ocgIsRegistered)) {
+            // ── Solo-vs-none diff (raster images / sublayers) ─────────────────
             try {
               const soloCfg = await pdf.getOptionalContentConfig()
               const noneCfg = await pdf.getOptionalContentConfig()
@@ -579,7 +625,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                   try { noneCfg.setVisibility(id, false) } catch { /* unsupported */ }
                 }
               }
-              try { soloCfg.setVisibility(ocgId, true) } catch { /* unsupported */ }
+              try { soloCfg.setVisibility(visId, true) } catch { /* unsupported */ }
 
               const soloCanvas = document.createElement('canvas')
               soloCanvas.width = artW_px; soloCanvas.height = artH_px
@@ -597,8 +643,32 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                 artW_px, artH_px
               )
               if (bbox) { baseCanvas = canvas; artBBox = bbox }
+              console.log(`[AI Import] Solo/none diff for "${layerName}": bbox=${JSON.stringify(bbox)}`)
             } catch (e) {
               console.warn(`[AI Import] Solo/none diff failed for "${layerName}":`, e)
+            }
+          } else if (ocgIsRegistered && !hasImage) {
+            // ── Full-vs-without diff (vector / gradient layers) ───────────────
+            // Both renders include ALL non-OCG page content + clipping context,
+            // so gradient sh operators are correctly bounded by their clip paths.
+            try {
+              const withoutCfg = await pdf.getOptionalContentConfig()
+              try { withoutCfg.setVisibility(ocgId, false) } catch { /* unsupported */ }
+
+              const withoutCanvas = document.createElement('canvas')
+              withoutCanvas.width = artW_px; withoutCanvas.height = artH_px
+              const withoutCtx = withoutCanvas.getContext('2d', { willReadFrequently: true })!
+              await page.render({ canvas: withoutCanvas, canvasContext: withoutCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
+
+              const { canvas, bbox } = diffToIsolated(
+                fullCtx.getImageData(0, 0, artW_px, artH_px).data,
+                withoutCtx.getImageData(0, 0, artW_px, artH_px).data,
+                artW_px, artH_px
+              )
+              if (bbox) { baseCanvas = canvas; artBBox = bbox }
+              console.log(`[AI Import] Full/without diff for "${layerName}": bbox=${JSON.stringify(bbox)}`)
+            } catch (e) {
+              console.warn(`[AI Import] Full/without diff failed for "${layerName}":`, e)
             }
           }
 
@@ -609,22 +679,13 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             const touchesTop    = artBBox.minY <= 4
             const touchesBottom = artBBox.maxY >= artH_px - 4
 
-            if (ocgIsRegistered && (touchesRight || touchesLeft || touchesTop || touchesBottom)) {
+            const canDoOverflow = visId && (touchesRight || touchesLeft || touchesTop || touchesBottom)
+            if (canDoOverflow) {
               const overflowPad = ofPad
               const overflowW = ofW
               const overflowH = ofH
               try {
-                // Solo-vs-none diff on overflow canvas (clip skipped for overflow capture)
-                const soloOFCfg = await pdf.getOptionalContentConfig()
-                const noneOFCfg = await pdf.getOptionalContentConfig()
-                for (const { id, isOCG } of allOCGs) {
-                  if (isOCG) {
-                    try { soloOFCfg.setVisibility(id, false) } catch { /* unsupported */ }
-                    try { noneOFCfg.setVisibility(id, false) } catch { /* unsupported */ }
-                  }
-                }
-                try { soloOFCfg.setVisibility(ocgId, true) } catch { /* unsupported */ }
-
+                // Use same diff strategy as Step 1 but on a padded overflow canvas
                 const makeOFCanvas = async (cfg: Awaited<ReturnType<typeof pdf.getOptionalContentConfig>>) => {
                   const c = document.createElement('canvas')
                   c.width = overflowW; c.height = overflowH
@@ -641,10 +702,29 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                   return ctx.getImageData(0, 0, overflowW, overflowH).data
                 }
 
-                const soloOFData = await makeOFCanvas(soloOFCfg)
-                const noneOFData = await makeOFCanvas(noneOFCfg)
+                let ofSrcData: Uint8ClampedArray, ofBaseData: Uint8ClampedArray
+                if (hasImage || !ocgIsRegistered) {
+                  // Solo-vs-none for raster images / sublayers
+                  const soloOFCfg = await pdf.getOptionalContentConfig()
+                  const noneOFCfg = await pdf.getOptionalContentConfig()
+                  for (const { id, isOCG } of allOCGs) {
+                    if (isOCG) {
+                      try { soloOFCfg.setVisibility(id, false) } catch { /* unsupported */ }
+                      try { noneOFCfg.setVisibility(id, false) } catch { /* unsupported */ }
+                    }
+                  }
+                  try { soloOFCfg.setVisibility(visId!, true) } catch { /* unsupported */ }
+                  ofSrcData = await makeOFCanvas(soloOFCfg)
+                  ofBaseData = await makeOFCanvas(noneOFCfg)
+                } else {
+                  // Full-vs-without for vector/gradient layers
+                  const withoutOFCfg = await pdf.getOptionalContentConfig()
+                  try { withoutOFCfg.setVisibility(ocgId, false) } catch { /* unsupported */ }
+                  ofSrcData = await makeOFCanvas(fullRenderCfg)
+                  ofBaseData = await makeOFCanvas(withoutOFCfg)
+                }
 
-                const { canvas: resultOFCanvas } = diffToIsolated(soloOFData, noneOFData, overflowW, overflowH)
+                const { canvas: resultOFCanvas } = diffToIsolated(ofSrcData, ofBaseData, overflowW, overflowH)
                 const resultData = resultOFCanvas.getContext('2d', { willReadFrequently: true })!
                   .getImageData(0, 0, overflowW, overflowH).data
                 const isVisible = (idx: number) => resultData[idx + 3] > 10
