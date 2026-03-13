@@ -203,17 +203,17 @@ function AIFieldItem({
                 />
               </>
             )}
-          </div>
-          {/* Opacity row */}
-          <div className="flex items-center gap-2 text-xs text-gray-400">
-            <span className="w-12 shrink-0">Opacity</span>
+            <span className="shrink-0 text-gray-500">%</span>
             <input
-              type="range" min={0} max={100} step={1}
+              type="number" min={0} max={100} step={1}
               value={Math.round((field.opacity ?? 1) * 100)}
-              onChange={(e) => updateField({ opacity: parseFloat(e.target.value) / 100 })}
-              className="flex-1 h-1 accent-cyan-400"
+              className="w-12 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
+              {...numericProps(
+                () => Math.round((field.opacity ?? 1) * 100),
+                (v) => updateField({ opacity: v / 100 }),
+                1, 10, 0, 100
+              )}
             />
-            <span className="w-8 text-right tabular-nums text-cyan-300">{Math.round((field.opacity ?? 1) * 100)}%</span>
           </div>
         </div>
       )}

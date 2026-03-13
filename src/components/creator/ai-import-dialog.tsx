@@ -547,6 +547,28 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           return { canvas: c, bbox: maxX >= minX && maxY >= minY ? { minX, minY, maxX, maxY } : null }
         }
 
+        // Helper: erase known text item positions from a diff canvas so sub-layer text
+        // is stripped from graphic extractions. Text from OTHER OCGs won't appear in
+        // the diff anyway (they're visible in both renders), so erasing all is safe.
+        const eraseTextFromDiffCanvas = (
+          canvas: HTMLCanvasElement, items: { vx: number; vy: number; fontSize: number; width: number; str: string }[],
+          pixelOffsetX = 0, pixelOffsetY = 0
+        ) => {
+          if (items.length === 0) return
+          const ctx = canvas.getContext('2d')!
+          ctx.save()
+          ctx.globalCompositeOperation = 'destination-out'
+          ctx.fillStyle = 'rgba(0,0,0,1)'
+          for (const item of items) {
+            const x = item.vx * renderScale + pixelOffsetX
+            const y = (item.vy - item.fontSize * 1.4) * renderScale + pixelOffsetY
+            const w = Math.max(item.width > 2 ? item.width : item.str.length * item.fontSize * 0.6, 10) * renderScale
+            const h = item.fontSize * 2 * renderScale
+            ctx.fillRect(x - 6, y - 6, w + 12, h + 12)
+          }
+          ctx.restore()
+        }
+
         // ── Process graphic OCGs ──────────────────────────────────────────
         for (const { id: ocgId, name: ocgRawName, isOCG: ocgIsRegistered } of graphicStarredOCGs) {
           const layerName = ocgRawName.replace(/^\s*\*/, '').trim()
@@ -599,6 +621,8 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
               const { canvas, bbox } = diffToIsolated(fullCanvasData, withoutData, artW_px, artH_px)
               baseCanvas = canvas; artBBox = bbox
+              // Strip sub-layer text from the graphic extraction
+              eraseTextFromDiffCanvas(baseCanvas, allTextItems)
             } catch (e) {
               console.warn(`[AI Import] Full/without diff failed for "${layerName}":`, e)
             }
@@ -639,6 +663,8 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                 const fullOF = fullOFData ?? new Uint8ClampedArray(overflowW * overflowH * 4).fill(255)
 
                 const { canvas: resultOFCanvas } = diffToIsolated(fullOF, withoutOFData, overflowW, overflowH)
+                // Strip sub-layer text from the overflow graphic extraction
+                eraseTextFromDiffCanvas(resultOFCanvas, allTextItems, ofPad, ofPad)
                 const resultData = resultOFCanvas.getContext('2d', { willReadFrequently: true })!
                   .getImageData(0, 0, overflowW, overflowH).data
                 const isVisible = (idx: number) => resultData[idx + 3] > 10
