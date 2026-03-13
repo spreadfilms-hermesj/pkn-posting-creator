@@ -647,6 +647,29 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             } catch (e) {
               console.warn(`[AI Import] Solo/none diff failed for "${layerName}":`, e)
             }
+
+            // Fallback for raster images: if solo-vs-none produced no bbox (image may not be
+            // OCG-controlled in pdfjs isolation mode), try full-vs-without. Unlike gradients,
+            // rasters don't have clip-flooding issues so this is safe.
+            if (!artBBox && hasImage && ocgIsRegistered) {
+              try {
+                const withoutCfg = await pdf.getOptionalContentConfig()
+                try { withoutCfg.setVisibility(ocgId, false) } catch { /* unsupported */ }
+                const withoutCanvas = document.createElement('canvas')
+                withoutCanvas.width = artW_px; withoutCanvas.height = artH_px
+                const withoutCtx = withoutCanvas.getContext('2d', { willReadFrequently: true })!
+                await page.render({ canvas: withoutCanvas, canvasContext: withoutCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
+                const { canvas, bbox } = diffToIsolated(
+                  fullCtx.getImageData(0, 0, artW_px, artH_px).data,
+                  withoutCtx.getImageData(0, 0, artW_px, artH_px).data,
+                  artW_px, artH_px
+                )
+                if (bbox) { baseCanvas = canvas; artBBox = bbox }
+                console.log(`[AI Import] Image fallback full/without diff for "${layerName}": bbox=${JSON.stringify(bbox)}`)
+              } catch (e) {
+                console.warn(`[AI Import] Image fallback diff failed for "${layerName}":`, e)
+              }
+            }
           } else if (ocgIsRegistered && !hasImage) {
             // ── Full-vs-without diff (vector / gradient layers) ───────────────
             // Both renders include ALL non-OCG page content + clipping context,
@@ -821,6 +844,20 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             x: gx, y: gy, width: gw, height: gh,
             fontSize: 0, color: '#ffffff', fontWeight: 'normal', fontStyle: 'normal', textAlign: 'left',
           })
+        }
+      }
+
+      // Punch transparent holes in bgCanvas where *Image fields are positioned.
+      // bgCanvas is rendered as an opaque PNG (pdfjs fills page background), so
+      // any element behind it (z=0) is invisible. The hole lets the actual photo
+      // show through the background canvas layer.
+      for (const field of extractedFields) {
+        if (field.type === 'graphic' && /^image$/i.test(field.layerName)) {
+          const hx = Math.floor(field.x * artW_px)
+          const hy = Math.floor(field.y * artH_px)
+          const hw = Math.ceil(field.width * artW_px)
+          const hh = Math.ceil(field.height * artH_px)
+          if (hw > 0 && hh > 0) bgCtx.clearRect(hx, hy, hw, hh)
         }
       }
 

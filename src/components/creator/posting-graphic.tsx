@@ -59,7 +59,7 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
             src={backgroundImageUrl}
             alt=""
             crossOrigin="anonymous"
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 1 }}
+            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', zIndex: 2 }}
           />
           {editableFields.map((field, i) => {
             const isSelected = !forExport && selectedFieldIndex === i
@@ -67,9 +67,9 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
             const top = field.y * artboardHeight
             const w = field.width * artboardWidth
             const h = field.height * artboardHeight
-            // Image-type layers (named *Image) sit BELOW the background canvas (z=0).
-            // The background canvas (design shapes) is z=1.
-            // All other editable fields (text, *Grafik, etc.) sit on top at z=2.
+            // Image-type layers (named *Image) sit BELOW all other editable fields (z=1),
+            // above the background canvas which has a transparent hole punched at this region.
+            // Background canvas is z=2. Other editable fields (text, *Grafik) are z=3.
             const isImageLayer = field.type === 'graphic' && /^image$/i.test(field.layerName)
             const sharedStyle: React.CSSProperties = {
               position: 'absolute',
@@ -80,7 +80,7 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
               outlineOffset: 6,
               borderRadius: 2,
               opacity: field.opacity ?? 1,
-              zIndex: isImageLayer ? 0 : 2,
+              zIndex: isImageLayer ? 1 : 3,
             }
 
             if (field.type === 'graphic') {
