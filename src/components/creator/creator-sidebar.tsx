@@ -171,20 +171,24 @@ function AIFieldItem({
           )}
           {field.type === 'graphic' && (
             <>
-              <input
-                ref={imageInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={handleImageReplace}
-              />
-              <button
-                onClick={() => imageInputRef.current?.click()}
-                className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/40 rounded text-xs text-gray-300 hover:text-cyan-300 transition-all"
-              >
-                <Upload className="w-3 h-3" />
-                {field.imageUrl ? 'Bild ersetzen' : 'Bild hochladen'}
-              </button>
+              {/^image$/i.test(field.layerName) && (
+                <>
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleImageReplace}
+                  />
+                  <button
+                    onClick={() => imageInputRef.current?.click()}
+                    className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/40 rounded text-xs text-gray-300 hover:text-cyan-300 transition-all"
+                  >
+                    <Upload className="w-3 h-3" />
+                    {field.imageUrl ? 'Bild ersetzen' : 'Bild hochladen'}
+                  </button>
+                </>
+              )}
               {!field.imageUrl && (
                 <p className="text-xs text-yellow-400/80 bg-yellow-500/10 rounded px-2 py-1.5">
                   Grafik konnte nicht isoliert werden — Position & Skalierung trotzdem einstellbar.
