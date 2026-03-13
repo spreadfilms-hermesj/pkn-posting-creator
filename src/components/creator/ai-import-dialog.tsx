@@ -606,31 +606,67 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             return true
           }
 
-          // Step 1 — "full vs without this OCG" diff at artboard size.
-          // Both renders include the full PDF clipping context so gradient sh operators
-          // are correctly clipped to their shape path. The diff isolates this element.
+          // Step 1 — Solo render: hide ALL OCGs except this one on a transparent canvas.
+          // This gives a clean isolation without other layers bleeding in (e.g. layers
+          // that blend/render over the image would appear in a full-vs-without diff).
+          // Fallback to full-vs-without diff for gradient fills that need clip context.
           let baseCanvas: HTMLCanvasElement | null = null
           let artBBox: { minX: number; minY: number; maxX: number; maxY: number } | null = null
           if (ocgIsRegistered) {
             try {
-              const withoutCfg = await pdf.getOptionalContentConfig()
-              for (const { id, isOCG } of effectiveOCGs) {
-                if (isOCG) try { withoutCfg.setVisibility(id, true) } catch { /* unsupported */ }
+              const soloCfg = await pdf.getOptionalContentConfig()
+              // Hide every OCG (starred and non-starred) then re-enable only this one
+              for (const { id, isOCG } of allOCGs) {
+                if (isOCG) try { soloCfg.setVisibility(id, false) } catch { /* unsupported */ }
               }
-              try { withoutCfg.setVisibility(ocgId, false) } catch { /* unsupported */ }
+              try { soloCfg.setVisibility(ocgId, true) } catch { /* unsupported */ }
 
-              const withoutCanvas = document.createElement('canvas')
-              withoutCanvas.width = artW_px; withoutCanvas.height = artH_px
-              const withoutCtx = withoutCanvas.getContext('2d', { willReadFrequently: true })!
-              await page.render({ canvas: withoutCanvas, canvasContext: withoutCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
-              const withoutData = withoutCtx.getImageData(0, 0, artW_px, artH_px).data
+              const soloCanvas = document.createElement('canvas')
+              soloCanvas.width = artW_px; soloCanvas.height = artH_px
+              const soloCtx = soloCanvas.getContext('2d', { willReadFrequently: true })!
+              // transparent canvas — pdfjs draws only this OCG's pixels
+              await page.render({ canvas: soloCanvas, canvasContext: soloCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(soloCfg) }).promise
+              const soloData = soloCtx.getImageData(0, 0, artW_px, artH_px).data
 
-              const { canvas, bbox } = diffToIsolated(fullCanvasData, withoutData, artW_px, artH_px)
-              baseCanvas = canvas; artBBox = bbox
-              // Strip sub-layer text from the graphic extraction
-              eraseTextFromDiffCanvas(baseCanvas, allTextItems)
+              // Find bbox from non-transparent pixels
+              let minX = artW_px, minY = artH_px, maxX = -1, maxY = -1
+              for (let py = 0; py < artH_px; py++) {
+                for (let px2 = 0; px2 < artW_px; px2++) {
+                  if (soloData[(py * artW_px + px2) * 4 + 3] > 10) {
+                    if (px2 < minX) minX = px2; if (px2 > maxX) maxX = px2
+                    if (py < minY) minY = py;   if (py > maxY) maxY = py
+                  }
+                }
+              }
+              if (maxX >= minX && maxY >= minY) {
+                baseCanvas = soloCanvas
+                artBBox = { minX, minY, maxX, maxY }
+              }
             } catch (e) {
-              console.warn(`[AI Import] Full/without diff failed for "${layerName}":`, e)
+              console.warn(`[AI Import] Solo render failed for "${layerName}":`, e)
+            }
+
+            // Fallback — full-vs-without diff (gradient fills that need full clip context)
+            if (!artBBox) {
+              try {
+                const withoutCfg = await pdf.getOptionalContentConfig()
+                for (const { id, isOCG } of effectiveOCGs) {
+                  if (isOCG) try { withoutCfg.setVisibility(id, true) } catch { /* unsupported */ }
+                }
+                try { withoutCfg.setVisibility(ocgId, false) } catch { /* unsupported */ }
+
+                const withoutCanvas = document.createElement('canvas')
+                withoutCanvas.width = artW_px; withoutCanvas.height = artH_px
+                const withoutCtx = withoutCanvas.getContext('2d', { willReadFrequently: true })!
+                await page.render({ canvas: withoutCanvas, canvasContext: withoutCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
+                const withoutData = withoutCtx.getImageData(0, 0, artW_px, artH_px).data
+
+                const { canvas, bbox } = diffToIsolated(fullCanvasData, withoutData, artW_px, artH_px)
+                baseCanvas = canvas; artBBox = bbox
+                eraseTextFromDiffCanvas(baseCanvas, allTextItems)
+              } catch (e) {
+                console.warn(`[AI Import] Full/without diff failed for "${layerName}":`, e)
+              }
             }
           }
 

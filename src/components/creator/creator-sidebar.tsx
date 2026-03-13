@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef } from 'react'
 import type { PostingConfig } from '@/types/posting'
 import { MediaUploader } from './media-uploader'
 import { PostTypeSelector } from './post-type-selector'
@@ -8,7 +8,7 @@ import { BrandToggles } from './brand-toggles'
 import { BrandSettingsComponent } from './brand-settings'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload } from 'lucide-react'
 
 interface CreatorSidebarProps {
   config: PostingConfig
@@ -81,11 +81,25 @@ function AIFieldItem({
     }
   }, [isSelected])
 
+  const imageInputRef = useRef<HTMLInputElement>(null)
+
   const updateField = (updates: Partial<AIEditableField>) => {
     const updated = aiImport.editableFields.map((f, fi) =>
       fi === index ? { ...f, ...updates } : f
     )
     updateConfig({ aiImport: { ...aiImport, editableFields: updated } })
+  }
+
+  const handleImageReplace = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const url = ev.target?.result as string
+      if (url) updateField({ imageUrl: url })
+    }
+    reader.readAsDataURL(file)
+    e.target.value = ''
   }
 
   // Returns onKeyDown + onChange handlers for a numeric input.
@@ -155,10 +169,28 @@ function AIFieldItem({
               rows={field.value.includes('\n') ? 3 : 2}
             />
           )}
-          {field.type === 'graphic' && !field.imageUrl && (
-            <p className="text-xs text-yellow-400/80 bg-yellow-500/10 rounded px-2 py-1.5">
-              Grafik konnte nicht isoliert werden — Position & Skalierung trotzdem einstellbar.
-            </p>
+          {field.type === 'graphic' && (
+            <>
+              <input
+                ref={imageInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={handleImageReplace}
+              />
+              <button
+                onClick={() => imageInputRef.current?.click()}
+                className="w-full flex items-center justify-center gap-2 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-cyan-500/40 rounded text-xs text-gray-300 hover:text-cyan-300 transition-all"
+              >
+                <Upload className="w-3 h-3" />
+                {field.imageUrl ? 'Bild ersetzen' : 'Bild hochladen'}
+              </button>
+              {!field.imageUrl && (
+                <p className="text-xs text-yellow-400/80 bg-yellow-500/10 rounded px-2 py-1.5">
+                  Grafik konnte nicht isoliert werden — Position & Skalierung trotzdem einstellbar.
+                </p>
+              )}
+            </>
           )}
           {/* Compact property row */}
           <div className="flex items-center gap-2 text-xs text-gray-400">
