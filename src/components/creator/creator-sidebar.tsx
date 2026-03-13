@@ -8,7 +8,7 @@ import { BrandToggles } from './brand-toggles'
 import { BrandSettingsComponent } from './brand-settings'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, ChevronUp, FileCode2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff } from 'lucide-react'
 
 interface CreatorSidebarProps {
   config: PostingConfig
@@ -121,17 +121,29 @@ function AIFieldItem({
   return (
     <div ref={ref} className="border-t border-white/10 first:border-t-0">
       {/* Header row — After Effects style */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className={`w-full flex items-center gap-2 px-4 py-2 transition-colors text-left ${isSelected ? 'bg-cyan-500/10' : 'hover:bg-white/5'}`}
-      >
-        <ChevronDown
-          className={`w-3 h-3 shrink-0 transition-transform ${open ? '' : '-rotate-90'} ${isSelected ? 'text-cyan-400' : 'text-gray-500'}`}
-        />
-        <span className={`font-mono text-xs font-semibold tracking-wide ${isSelected ? 'text-cyan-300' : 'text-cyan-400'}`}>*{field.layerName}</span>
-        {field.type === 'graphic' && <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">Grafik</span>}
-        {isSelected && <span className="ml-auto text-[10px] text-cyan-500 font-normal">aktiv</span>}
-      </button>
+      <div className={`flex items-center gap-1 pr-2 transition-colors ${isSelected ? 'bg-cyan-500/10' : ''}`}>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex-1 flex items-center gap-2 px-4 py-2 text-left hover:bg-white/5"
+        >
+          <ChevronDown
+            className={`w-3 h-3 shrink-0 transition-transform ${open ? '' : '-rotate-90'} ${isSelected ? 'text-cyan-400' : 'text-gray-500'}`}
+          />
+          <span className={`font-mono text-xs font-semibold tracking-wide ${(field.opacity ?? 1) === 0 ? 'opacity-30' : ''} ${isSelected ? 'text-cyan-300' : 'text-cyan-400'}`}>*{field.layerName}</span>
+          {field.type === 'graphic' && <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">Grafik</span>}
+          {isSelected && <span className="ml-auto text-[10px] text-cyan-500 font-normal">aktiv</span>}
+        </button>
+        <button
+          onClick={() => updateField({ opacity: (field.opacity ?? 1) > 0 ? 0 : 1 })}
+          className="shrink-0 p-1 rounded hover:bg-white/10 transition-colors"
+          title={(field.opacity ?? 1) > 0 ? 'Layer ausblenden' : 'Layer einblenden'}
+        >
+          {(field.opacity ?? 1) > 0
+            ? <Eye className="w-3.5 h-3.5 text-gray-400" />
+            : <EyeOff className="w-3.5 h-3.5 text-gray-600" />
+          }
+        </button>
+      </div>
 
       {open && (
         <div className="px-4 pb-3 space-y-2">
@@ -203,17 +215,6 @@ function AIFieldItem({
                 />
               </>
             )}
-            <span className="shrink-0 text-gray-500">%</span>
-            <input
-              type="number" min={0} max={100} step={1}
-              value={Math.round((field.opacity ?? 1) * 100)}
-              className="w-12 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
-              {...numericProps(
-                () => Math.round((field.opacity ?? 1) * 100),
-                (v) => updateField({ opacity: v / 100 }),
-                1, 10, 0, 100
-              )}
-            />
           </div>
         </div>
       )}

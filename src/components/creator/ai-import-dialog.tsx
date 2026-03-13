@@ -441,7 +441,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       } else {
         // ── Process text OCGs (correctly ordered by operator list position) ──
         for (let ti = 0; ti < textStarredOCGs.length; ti++) {
-          const { name: ocgRawName, id: ocgId } = textStarredOCGs[ti]
+          const { name: ocgRawName, id: ocgId, isOCG: textIsOCG } = textStarredOCGs[ti]
           const layerName = ocgRawName.replace(/^\s*\*/, '').trim()
 
           // Try OCG-specific text items first, then fall back to positional block
@@ -466,12 +466,15 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           })), vp1.width * 0.95)
           const fs = block[0].fontSize
           const pad = Math.ceil(fs * renderScale * 0.25)
-          paintOver(
-            Math.max(0, Math.floor(minVx * renderScale) - pad),
-            Math.max(0, Math.floor(topVy * renderScale) - pad),
-            Math.ceil((maxVx - minVx) * renderScale) + pad * 2,
-            Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
-          )
+          // Only paintOver for sublayers that can't be hidden (isOCG: false)
+          if (!textIsOCG) {
+            paintOver(
+              Math.max(0, Math.floor(minVx * renderScale) - pad),
+              Math.max(0, Math.floor(topVy * renderScale) - pad),
+              Math.ceil((maxVx - minVx) * renderScale) + pad * 2,
+              Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
+            )
+          }
           extractedFields.push({
             type: 'text', layerName, value: text, originalText: text,
             x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
@@ -596,7 +599,10 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             const bgY = Math.max(0, cropY - offsetY)
             const bgW = Math.min(artW_px - bgX, cropW - Math.max(0, offsetX - cropX))
             const bgH = Math.min(artH_px - bgY, cropH - Math.max(0, offsetY - cropY))
-            if (bgW > 0 && bgH > 0) paintOver(bgX, bgY, bgW, bgH)
+            // Only paintOver for unregistered sublayers (isOCG: false) — registered OCGs
+            // are already absent from bgCanvas via setVisibility; calling paintOver on them
+            // destroys the photo/background pixels behind the element.
+            if (bgW > 0 && bgH > 0 && !ocgIsRegistered) paintOver(bgX, bgY, bgW, bgH)
             return true
           }
 
