@@ -256,11 +256,24 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const bgCanvas = document.createElement('canvas')
       bgCanvas.width = artW_px
       bgCanvas.height = artH_px
-      const bgCtx = bgCanvas.getContext('2d')!
+      const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true })!
       await page.render({
         canvas: bgCanvas, canvasContext: bgCtx, viewport: renderVp,
         optionalContentConfigPromise: Promise.resolve(bgCfg),
       }).promise
+
+      // "Page background only" canvas: ALL registered OCGs hidden (starred + non-starred).
+      // Used later to distinguish bare page-background pixels (→ transparent, let *Image
+      // show through) from design-element pixels (Element, Background overlays → keep opaque).
+      const pageBgCfg = await pdf.getOptionalContentConfig()
+      for (const { id, isOCG } of allOCGs) {
+        if (isOCG) try { pageBgCfg.setVisibility(id, false) } catch { /* unsupported */ }
+      }
+      const pageBgCanvas = document.createElement('canvas')
+      pageBgCanvas.width = artW_px; pageBgCanvas.height = artH_px
+      const pageBgCtx = pageBgCanvas.getContext('2d', { willReadFrequently: true })!
+      await page.render({ canvas: pageBgCanvas, canvasContext: pageBgCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(pageBgCfg) }).promise
+      const pageBgData = pageBgCtx.getImageData(0, 0, artW_px, artH_px).data
 
       // Helper: erase a region from bgCanvas by sampling surrounding color
       const paintOver = (cx: number, cy: number, cw: number, ch: number) => {
@@ -847,18 +860,38 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
       }
 
-      // Punch transparent holes in bgCanvas where *Image fields are positioned.
-      // bgCanvas is rendered as an opaque PNG (pdfjs fills page background), so
-      // any element behind it (z=0) is invisible. The hole lets the actual photo
-      // show through the background canvas layer.
-      for (const field of extractedFields) {
-        if (field.type === 'graphic' && /^image$/i.test(field.layerName)) {
-          const hx = Math.floor(field.x * artW_px)
-          const hy = Math.floor(field.y * artH_px)
-          const hw = Math.ceil(field.width * artW_px)
-          const hh = Math.ceil(field.height * artH_px)
-          if (hw > 0 && hh > 0) bgCtx.clearRect(hx, hy, hw, hh)
+      // Make bgCanvas transparent in *Image regions — but ONLY for bare page-background
+      // pixels (those matching pageBgCanvas). Pixels from design layers that sit above
+      // *Image in the layer stack (e.g. "Element", "Background" overlays) are KEPT opaque
+      // so they render correctly on top of the photo.
+      //
+      // Algorithm per pixel inside each *Image field's bbox:
+      //   |bgCanvas – pageBgCanvas| ≤ 12 → page background only → alpha = 0 (transparent)
+      //   |bgCanvas – pageBgCanvas| >  12 → design element       → keep (alpha unchanged)
+      const hasImageField = extractedFields.some(
+        f => f.type === 'graphic' && /^image$/i.test(f.layerName)
+      )
+      if (hasImageField) {
+        const bgImgData = bgCtx.getImageData(0, 0, artW_px, artH_px)
+        const bgPixels = bgImgData.data
+        for (const field of extractedFields) {
+          if (field.type === 'graphic' && /^image$/i.test(field.layerName)) {
+            const x0 = Math.max(0, Math.floor(field.x * artW_px))
+            const y0 = Math.max(0, Math.floor(field.y * artH_px))
+            const x1 = Math.min(artW_px, Math.ceil((field.x + field.width) * artW_px))
+            const y1 = Math.min(artH_px, Math.ceil((field.y + field.height) * artH_px))
+            for (let py = y0; py < y1; py++) {
+              for (let px2 = x0; px2 < x1; px2++) {
+                const idx = (py * artW_px + px2) * 4
+                const diff = Math.abs(bgPixels[idx]     - pageBgData[idx])
+                           + Math.abs(bgPixels[idx + 1] - pageBgData[idx + 1])
+                           + Math.abs(bgPixels[idx + 2] - pageBgData[idx + 2])
+                if (diff <= 12) bgPixels[idx + 3] = 0
+              }
+            }
+          }
         }
+        bgCtx.putImageData(bgImgData, 0, 0)
       }
 
       setBackgroundUrl(bgCanvas.toDataURL('image/png'))
