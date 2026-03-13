@@ -257,9 +257,12 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       bgCanvas.width = artW_px
       bgCanvas.height = artH_px
       const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true })!
+      // 'transparent' background tells pdfjs not to pre-fill the canvas with white,
+      // so semi-transparent objects retain their correct alpha channel in the output.
       await page.render({
         canvas: bgCanvas, canvasContext: bgCtx, viewport: renderVp,
         optionalContentConfigPromise: Promise.resolve(bgCfg),
+        background: 'transparent',
       }).promise
 
       // "Page background only" canvas: ALL registered OCGs hidden (starred + non-starred).
@@ -272,7 +275,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const pageBgCanvas = document.createElement('canvas')
       pageBgCanvas.width = artW_px; pageBgCanvas.height = artH_px
       const pageBgCtx = pageBgCanvas.getContext('2d', { willReadFrequently: true })!
-      await page.render({ canvas: pageBgCanvas, canvasContext: pageBgCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(pageBgCfg) }).promise
+      await page.render({ canvas: pageBgCanvas, canvasContext: pageBgCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(pageBgCfg), background: 'transparent' }).promise
       const pageBgData = pageBgCtx.getImageData(0, 0, artW_px, artH_px).data
 
       // Helper: erase a region from bgCanvas by sampling surrounding color
@@ -883,10 +886,14 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             for (let py = y0; py < y1; py++) {
               for (let px2 = x0; px2 < x1; px2++) {
                 const idx = (py * artW_px + px2) * 4
-                const diff = Math.abs(bgPixels[idx]     - pageBgData[idx])
-                           + Math.abs(bgPixels[idx + 1] - pageBgData[idx + 1])
-                           + Math.abs(bgPixels[idx + 2] - pageBgData[idx + 2])
-                if (diff <= 12) bgPixels[idx + 3] = 0
+                const rgbDiff = Math.abs(bgPixels[idx]     - pageBgData[idx])
+                              + Math.abs(bgPixels[idx + 1] - pageBgData[idx + 1])
+                              + Math.abs(bgPixels[idx + 2] - pageBgData[idx + 2])
+                // Also check that this pixel doesn't have significantly more alpha than
+                // the page background — this catches dark/black design elements whose
+                // RGB matches the background (0,0,0) but whose alpha differs.
+                const alphaDiff = bgPixels[idx + 3] - pageBgData[idx + 3]
+                if (rgbDiff <= 12 && alphaDiff <= 30) bgPixels[idx + 3] = 0
               }
             }
           }
