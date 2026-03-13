@@ -434,7 +434,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
             width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
             height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
-            scale: 1, fontSize: fs, color: '#ffffff',
+            scale: 1, opacity: 1, fontSize: fs, color: '#ffffff',
             fontWeight: fs >= 18 ? 'bold' : 'normal', fontStyle: 'normal', textAlign: 'left',
           })
         })
@@ -477,7 +477,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
             width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
             height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
-            scale: 1, fontSize: fs, color: '#ffffff',
+            scale: 1, opacity: 1, fontSize: fs, color: '#ffffff',
             fontWeight: fs >= 18 ? 'bold' : 'normal', fontStyle: 'normal', textAlign: 'left',
           })
         }
@@ -731,7 +731,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
           extractedFields.push({
             type: 'graphic', layerName, value: '', originalText: '',
-            imageUrl, scale: 1,
+            imageUrl, scale: 1, opacity: 1,
             x: gx, y: gy, width: gw, height: gh,
             fontSize: 0, color: '#ffffff', fontWeight: 'normal', fontStyle: 'normal', textAlign: 'left',
           })

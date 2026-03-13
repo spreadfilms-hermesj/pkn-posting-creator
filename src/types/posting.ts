@@ -17,6 +17,8 @@ export interface AIEditableField {
   y: number
   width: number
   height: number
+  // shared appearance
+  opacity: number        // 0–1, default 1
 }
 
 export interface AIImportData {

@@ -75,6 +75,7 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
               outline: isSelected ? '2px solid #22d3ee' : 'none',
               outlineOffset: 6,
               borderRadius: 2,
+              opacity: field.opacity ?? 1,
             }
 
             if (field.type === 'graphic') {
