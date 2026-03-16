@@ -197,6 +197,26 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
       }
 
+      // Supplement allOCGs with any registered OCGs that weren't found by the content-stream scan.
+      // Illustrator sometimes writes sublayer OCGs (especially graphic/image layers) without
+      // active BDC markers in the visible content stream, so they would be missed above.
+      // ocgConfig[Symbol.iterator] yields [id, OptionalContentGroup] pairs from #groups (all registered OCGs).
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cfgIter: Iterator<[string, any]> = (ocgConfig as any)[Symbol.iterator]()
+        const scannedOCGIds = new Set(allOCGs.filter(g => g.isOCG).map(g => g.id))
+        let cfgStep = cfgIter.next()
+        while (!cfgStep.done) {
+          const [ocgId, ocgGroup] = cfgStep.value as [string, any]
+          cfgStep = cfgIter.next()
+          if (!scannedOCGIds.has(ocgId)) {
+            const name = (ocgGroup as any)?.name ?? ocgId
+            allOCGs.push({ id: ocgId, name, isOCG: true, parentId: null })
+            console.log(`[AI Import] Supplemented OCG from config: "${name}" (${ocgId})`)
+          }
+        }
+      } catch { /* iterator not available in this pdfjs build */ }
+
       // Layers named with a leading '_' (e.g. "_16:9") are transparent artboard containers —
       // they are excluded from editable fields and hidden in the background render.
       const containerIds = new Set(
