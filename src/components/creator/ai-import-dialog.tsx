@@ -308,37 +308,18 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
       } catch { /* iterator not available in this pdfjs build */ }
 
-      // If a container marker was found, keep it visible so its non-starred sublayers
-      // (Background, Element, etc.) remain rendered in the background image.
+      // Keep _-container visible so its non-starred sublayers (Background, etc.) render in bgCanvas.
       const containerIds = new Set<string>()
       if (containerOCGId) containerIds.add(containerOCGId)
 
-      // Range boundaries for this artboard based on content-stream position.
-      // Illustrator writes artboard layers as flat (non-nested) BDC markers in content-stream order:
-      //   [artboard-n layers (drawn first, lowest idx)] ... [artboard-1 layers (drawn last, highest idx)]
-      // Each _-marker for artboard k precedes its sublayers in the stream.
-      // We isolate exactly this artboard's layers using the range (containerIdx, nextContainerIdx).
-      const containerIdx = containerOCGId ? (ocgFirstOccurrence.get(containerOCGId) ?? -1) : -1
-      // markerOCGs is sorted DESCENDING (artboard 1 = highest idx first). Reverse → ascending order.
-      const markersSortedAsc = [...markerOCGs].reverse()
-      const currentInAsc = markersSortedAsc.findIndex(m => m.id === containerOCGId)
-      const nextMarker = currentInAsc >= 0 ? markersSortedAsc[currentInAsc + 1] : null
-      const nextContainerIdx = nextMarker ? (ocgFirstOccurrence.get(nextMarker.id) ?? Infinity) : Infinity
-
-      // Effective OCGs: *-prefixed and !-prefixed layers belonging to this artboard.
-      // BDC-found OCGs are isolated by content-stream range (text isolation).
-      // Supplemented OCGs (pos=-1, no BDC markers = graphic/image layers) pass through
-      // unconditionally — rendering on this page produces zero pixels for other artboards,
-      // so the post-extraction guard naturally skips them.
+      // Effective OCGs: all *-prefixed and !-prefixed layers — no range filtering.
+      // The content-stream position of _-markers is unreliable for isolation: in some files
+      // the container appears AFTER its sublayers in draw order (bottom-to-top), which would
+      // exclude all editable layers from the range. Rendering-based extraction naturally isolates
+      // content per-page, so including all */!-prefixed OCGs is always correct.
       const effectiveOCGs = allOCGs.filter(g => {
         const name = g.name.trimStart()
-        if (!name.startsWith('*') && !name.startsWith('!')) return false
-        if (containerOCGId !== null && containerIdx >= 0) {
-          const pos = ocgFirstOccurrence.get(g.id) ?? -1
-          if (pos === -1) return true // supplemented OCG — rendering isolates it
-          return pos > containerIdx && pos < nextContainerIdx
-        }
-        return true // no _-markers → flat single-artboard structure, include all */!-prefixed layers
+        return name.startsWith('*') || name.startsWith('!')
       })
 
       console.log('[AI Import] Container marker:', containerOCG ? `"${containerOCG.name}" (${containerOCGId})` : 'none (flat structure)')
