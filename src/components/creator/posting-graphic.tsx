@@ -138,7 +138,6 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
               </div>
             )
           })}
-          {config.logoEnabled && <LogoComponent config={config} />}
         </div>
       </ExportContext.Provider>
     )

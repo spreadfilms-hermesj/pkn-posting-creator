@@ -164,22 +164,48 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       // tell us exactly which OCG each text item belongs to.
       const textContent = await page.getTextContent({ includeMarkedContent: true })
 
-      // Derive CSS numeric font weight from the resolved font-family string that
-      // pdfjs provides in textContent.styles (e.g. "Helvetica-Light", "Arial,Bold").
-      const parseFontWeight = (fontFamily: string): number => {
-        const f = fontFamily.toLowerCase()
-        if (/thin|hairline/.test(f))             return 100
-        if (/extra.?light|ultra.?light/.test(f)) return 200
-        if (/\blight\b/.test(f))                 return 300
-        if (/demi.?bold|semi.?bold/.test(f))     return 600
-        if (/extra.?bold|ultra.?bold/.test(f))   return 800
-        if (/black|heavy/.test(f))               return 900
-        if (/\bbold\b/.test(f))                  return 700
-        if (/\bmedium\b/.test(f))                return 500
+      // Parse CSS numeric font weight from a PostScript / font-family name string.
+      // Uses simple substring matching (no word boundaries) to handle names like
+      // "HelveticaNeue-BoldMT", "Arial,Bold", "MyriadPro-Semibold" etc.
+      const parseFontWeight = (name: string): number => {
+        const f = name.toLowerCase()
+        if (/thin|hairline/.test(f))                           return 100
+        if (/extralight|extra.?light|ultralight/.test(f))      return 200
+        if (/light/.test(f))                                   return 300
+        if (/demibold|demi.?bold|semibold|semi.?bold/.test(f)) return 600
+        if (/extrabold|extra.?bold|ultrabold/.test(f))         return 800
+        if (/black|heavy/.test(f))                             return 900
+        if (/bold/.test(f))                                    return 700
+        if (/medium/.test(f))                                  return 500
         return 400 // regular / normal
       }
+
+      // Build a fontName (pdfjs loadedName) → weight map using the actual PostScript
+      // names stored in page.commonObjs after getOperatorList() resolved the page.
+      // This is the only reliable source because textContent.styles.fontFamily returns
+      // generated IDs (e.g. "g_d0_f1") for embedded fonts, not the PostScript name.
+      const fontWeightMap = new Map<string, number>()
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const objs: Record<string, any> = (page as any).commonObjs?._objs ?? {}
+        for (const [key, val] of Object.entries(objs)) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const psName: string | undefined = (val as any)?.data?.name
+          if (typeof psName === 'string' && psName) {
+            const w = parseFontWeight(psName)
+            fontWeightMap.set(key, w)
+            console.log(`[AI Import] Font "${key}" → psName="${psName}" → weight ${w}`)
+          }
+        }
+      } catch { /* private API not available; fall through to textStyles fallback */ }
+
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const textStyles = (textContent as any).styles as Record<string, { fontFamily: string }> ?? {}
+
+      // Resolve font weight for a given pdfjs fontName: prefer commonObjs PostScript name,
+      // fall back to textStyles.fontFamily (works for non-embedded system fonts).
+      const getFontWeight = (fontName: string): number =>
+        fontWeightMap.get(fontName) ?? parseFontWeight(textStyles[fontName]?.fontFamily ?? fontName)
 
       type RichItem = { str: string; vx: number; vy: number; fontSize: number; width: number; fontName: string }
       // Map from OCG ID → text items found in that OCG's marked content section
@@ -491,14 +517,13 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
           )
           const label = i === 0 ? 'Headline' : i === 1 ? 'Subline' : `Text ${i + 1}`
-          const fontFamily0 = textStyles[block[0].fontName]?.fontFamily ?? block[0].fontName ?? ''
           extractedFields.push({
             type: 'text', layerName: label, value: text, originalText: text,
             x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
             width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
             height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
             scale: 1, opacity: 1, fontSize: fs, color: '#ffffff',
-            fontWeight: parseFontWeight(fontFamily0), fontStyle: 'normal', textAlign: 'left',
+            fontWeight: getFontWeight(block[0].fontName), fontStyle: 'normal', textAlign: 'left',
           })
         })
       } else {
@@ -538,14 +563,13 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
               Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
             )
           }
-          const fontFamilyOCG = textStyles[block[0].fontName]?.fontFamily ?? block[0].fontName ?? ''
           extractedFields.push({
             type: 'text', layerName, value: text, originalText: text,
             x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
             width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
             height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
             scale: 1, opacity: 1, fontSize: fs, color: '#ffffff',
-            fontWeight: parseFontWeight(fontFamilyOCG), fontStyle: 'normal', textAlign: 'left',
+            fontWeight: getFontWeight(block[0].fontName), fontStyle: 'normal', textAlign: 'left',
           })
         }
 
