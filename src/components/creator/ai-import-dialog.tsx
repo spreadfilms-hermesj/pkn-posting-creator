@@ -197,21 +197,18 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
       }
 
-      // Layers named with a leading '_' (e.g. "_16:9") are transparent artboard containers.
-      // The import treats all their direct children as primary editable layers, identical to
-      // how top-level */* layers would normally work. The container itself is never an editable field.
+      // Layers named with a leading '_' (e.g. "_16:9") are transparent artboard containers —
+      // they are excluded from editable fields and hidden in the background render.
       const containerIds = new Set(
         allOCGs.filter(g => g.name.trimStart().startsWith('_')).map(g => g.id)
       )
 
-      const starredOCGs = allOCGs.filter(g => {
+      // Include ALL *-prefixed and !-prefixed layers regardless of nesting depth.
+      // This handles the case where editable layers are sublayers of a _-container in Illustrator.
+      const effectiveOCGs = allOCGs.filter(g => {
         const name = g.name.trimStart()
-        if (!name.startsWith('*') && !name.startsWith('!')) return false
-        if (containerIds.size === 0) return true // no containers → all starred are primary (backward-compat)
-        return g.parentId !== null && containerIds.has(g.parentId)
+        return name.startsWith('*') || name.startsWith('!')
       })
-      // Fall back to all non-container layers when no starred layers found
-      const effectiveOCGs = starredOCGs.length > 0 ? starredOCGs : allOCGs.filter(g => !containerIds.has(g.id))
 
       console.log('[AI Import] All OCGs:', allOCGs.map(g => `${g.id} (${g.isOCG ? 'OCG' : 'layer'}): "${g.name}" parent=${g.parentId ?? 'top'}`))
       console.log('[AI Import] Containers:', Array.from(containerIds))
