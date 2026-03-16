@@ -587,10 +587,12 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       console.log('[AI Import] OCG path bboxes:', Array.from(ocgPathBBox.entries()))
 
       // Separate and order OCGs
-      const textStarredOCGs = effectiveOCGs
-        .filter(ocg => ocgIsText.get(ocg.id) === true)
-        .sort((a, b) => (ocgFirstIdx.get(a.id) ?? 0) - (ocgFirstIdx.get(b.id) ?? 0))
-      const graphicStarredOCGs = effectiveOCGs.filter(ocg => ocgIsText.get(ocg.id) !== true)
+      // Sort in DESCENDING ocgFirstIdx order: PDF draws bottom-to-top, so descending = Illustrator top-to-bottom layer order
+      const sortedEffectiveOCGs = [...effectiveOCGs].sort(
+        (a, b) => (ocgFirstIdx.get(b.id) ?? 0) - (ocgFirstIdx.get(a.id) ?? 0)
+      )
+      const textStarredOCGs = sortedEffectiveOCGs.filter(ocg => ocgIsText.get(ocg.id) === true)
+      const graphicStarredOCGs = sortedEffectiveOCGs.filter(ocg => ocgIsText.get(ocg.id) !== true)
 
       console.log('[AI Import] Text OCGs (ordered):', textStarredOCGs.map(g => g.name))
       console.log('[AI Import] Graphic OCGs:', graphicStarredOCGs.map(g => g.name))
@@ -1007,6 +1009,13 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             fontSize: 0, color: '#ffffff', fontWeight: 400, fontStyle: 'normal', textAlign: 'left',
           })
         }
+
+        // Reorder extractedFields to match Illustrator layer order (sortedEffectiveOCGs)
+        const layerOrder = new Map<string, number>()
+        sortedEffectiveOCGs.forEach((ocg, i) => {
+          layerOrder.set(ocg.name.replace(/^\s*[*!]/, '').trim(), i)
+        })
+        extractedFields.sort((a, b) => (layerOrder.get(a.layerName) ?? 999) - (layerOrder.get(b.layerName) ?? 999))
       }
 
       // Make bgCanvas transparent in !-image slot regions — but ONLY for bare page-background
@@ -1248,7 +1257,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                       {fields.map((field, i) => (
                         <div key={i}>
                           <Label className="text-gray-300 flex items-center gap-2 mb-2">
-                            <span className="text-cyan-400 text-xs bg-cyan-500/20 px-2 py-0.5 rounded font-mono">{field.isImageSlot ? '!' : '*'}{field.layerName}</span>
+                            <span className="text-cyan-400 text-xs bg-cyan-500/20 px-2 py-0.5 rounded font-mono">{field.layerName}</span>
                             <span className="text-xs text-gray-500">{field.isImageSlot ? 'Bild-Layer' : field.type === 'graphic' ? 'Grafik-Layer' : 'Text-Layer'}</span>
                             {field.type === 'text' && field.value !== field.originalText && (
                               <button
