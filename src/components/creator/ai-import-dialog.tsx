@@ -231,7 +231,16 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           newDoc.addPage(copiedPage)
 
           if (containerIdx >= 0 && inRangeNames.size > 0) {
-            // Find all /OCG objects in the new document and filter to in-range names
+            // Names of ALL OCGs seen via BDC markers (across all artboards in the stream).
+            // OCGs NOT in this set are "supplemented" — they have no BDC markers and can't
+            // be range-attributed. We include them tentatively so they're visible to pdfjs.
+            const preSeenNames = new Set(Array.from(preOcgNames.values()))
+
+            // Find all /OCG objects in the new document and filter:
+            // - Include if name is in inRangeNames (confirmed belongs to this artboard)
+            // - Include if name was NOT seen in the content stream at all (supplemented OCG,
+            //   e.g. *Grafik or !Image with no BDC markers — cannot determine artboard from
+            //   stream position, include tentatively; cross-artboard bleed filtered later)
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const ocgRefs: any[] = []
             for (const [ref, obj] of newDoc.context.enumerateIndirectObjects()) {
@@ -244,7 +253,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                   const ocgName = rawName.startsWith('(')
                     ? rawName.slice(1, -1) // strip PDF string delimiters
                     : rawName.replace(/^\//, '') // strip leading slash from PDF name
-                  if (inRangeNames.has(ocgName)) {
+                  if (inRangeNames.has(ocgName) || !preSeenNames.has(ocgName)) {
                     ocgRefs.push(ref)
                   }
                 }
@@ -968,11 +977,6 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         for (const { id: ocgId, name: ocgRawName, isOCG: ocgIsRegistered } of graphicStarredOCGs) {
           const layerName = ocgRawName.replace(/^\s*[*!]/, '').trim()
           const isImageSlot = ocgRawName.trimStart().startsWith('!')
-          // Skip graphic OCGs with no evidence of content on this page (phantom cross-artboard leaks)
-          if (!ocgFirstIdx.has(ocgId) && !ocgPathBBox.has(ocgId)) {
-            console.log(`[AI Import] Skipping empty graphic OCG: "${layerName}"`)
-            continue
-          }
           console.log(`[AI Import] Extracting graphic: "${layerName}" (${ocgId})`)
 
           let imageUrl: string | undefined
@@ -1247,6 +1251,14 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
               const cropH = Math.min(artH_px - cropY, Math.ceil(opBBox.maxY - opBBox.minY) + pad2 * 2)
               applyGraphicCropFrom(fullCanvas, cropX, cropY, cropW, cropH, 0, 0)
             }
+          }
+
+          // Skip non-imageSlot graphic layers with no extracted content — they have no
+          // visible pixels on this page (cross-artboard or truly empty vector layer).
+          // Image slots (!-prefixed) are always kept even if empty — they're user-upload placeholders.
+          if (!imageUrl && !isImageSlot) {
+            console.log(`[AI Import] Skipping graphic OCG with no extracted content: "${layerName}"`)
+            continue
           }
 
           extractedFields.push({
