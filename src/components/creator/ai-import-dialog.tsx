@@ -66,12 +66,32 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         const ctx = canvas.getContext('2d')!
         await page.render({ canvas, canvasContext: ctx, viewport: thumbVp }).promise
 
-        const label = pageLabels?.[i - 1]
-        const name = label
-          ? label
-          : pdf.numPages === 1
-          ? file.name.replace(/\.ai$/i, '')
-          : `Artboard ${i}`
+        const pageLabel = pageLabels?.[i - 1]
+        // Prefer page label if it looks like a real name (not just a page number)
+        let name = pageLabel && !/^\d+$/.test(pageLabel.trim()) ? pageLabel : null
+
+        // Try Illustrator's /VP ViewportDictionary — stores artboard names as /Name entries
+        if (!name) {
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const rawPage = page as any
+            const pd = rawPage._pageDict ?? rawPage.pageDict
+            const vp = typeof pd?.get === 'function' ? pd.get('VP') : null
+            if (vp) {
+              const vpArr = Array.isArray(vp) ? vp : [vp]
+              for (const entry of vpArr) {
+                const n = typeof entry?.get === 'function' ? entry.get('Name') : entry?.Name
+                if (n && typeof n === 'string' && n.trim().length > 0) { name = n.trim(); break }
+              }
+            }
+          } catch { /* VP not accessible in this pdfjs build */ }
+        }
+
+        if (!name) {
+          name = pdf.numPages === 1
+            ? file.name.replace(/\.ai$/i, '')
+            : `Artboard ${i}`
+        }
 
         boards.push({
           pageNum: i,
@@ -1014,6 +1034,19 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           layerOrder.set(ocg.name.replace(/^\s*[*!]/, '').trim(), i)
         })
         extractedFields.sort((a, b) => (layerOrder.get(a.layerName) ?? 999) - (layerOrder.get(b.layerName) ?? 999))
+      }
+
+      // Remove fields that have no overlap with the artboard [0,1]×[0,1] area.
+      // In Illustrator files with multiple artboards, other artboards' layers can
+      // appear in the content stream but are positioned outside this artboard's bounds.
+      for (let fi = extractedFields.length - 1; fi >= 0; fi--) {
+        const f = extractedFields[fi]
+        const x2 = f.x + Math.max(f.width, 0.02)
+        const y2 = f.y + Math.max(f.height, 0.02)
+        if (x2 <= 0 || f.x >= 1 || y2 <= 0 || f.y >= 1) {
+          console.log(`[AI Import] Removing out-of-bounds field "${f.layerName}": x=${f.x.toFixed(3)} y=${f.y.toFixed(3)} w=${f.width.toFixed(3)} h=${f.height.toFixed(3)}`)
+          extractedFields.splice(fi, 1)
+        }
       }
 
       // Make bgCanvas transparent in !-image slot regions — but ONLY for bare page-background
