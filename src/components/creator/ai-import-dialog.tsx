@@ -1120,14 +1120,6 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             }
           }
 
-          // Skip non-imageSlot graphic layers with no extracted content — they have no
-          // visible pixels on this page (cross-artboard or truly empty vector layer).
-          // Image slots (!-prefixed) are always kept even if empty — they're user-upload placeholders.
-          if (!imageUrl && !isImageSlot) {
-            console.log(`[AI Import] Skipping graphic OCG with no extracted content: "${layerName}"`)
-            continue
-          }
-
           extractedFields.push({
             type: 'graphic', layerName, isImageSlot, value: '', originalText: '',
             imageUrl, scale: 1, opacity: 1,
