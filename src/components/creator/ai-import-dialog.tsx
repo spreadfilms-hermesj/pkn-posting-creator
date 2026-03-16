@@ -623,7 +623,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           const label = i === 0 ? 'Headline' : i === 1 ? 'Subline' : `Text ${i + 1}`
           extractedFields.push({
             type: 'text', layerName: label, value: text, originalText: text,
-            x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
+            x: minVx / vp1.width, y: topVy / vp1.height,
             width: Math.min(0.98, Math.max(0.5, (maxVx - minVx) / vp1.width)),
             height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
             scale: 1, opacity: 1, fontSize: fs, color: '#ffffff',
@@ -669,7 +669,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           }
           extractedFields.push({
             type: 'text', layerName, value: text, originalText: text,
-            x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
+            x: minVx / vp1.width, y: topVy / vp1.height,
             width: Math.min(0.98, Math.max(0.5, (maxVx - minVx) / vp1.width)),
             height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
             scale: 1, opacity: 1, fontSize: fs, color: '#ffffff',

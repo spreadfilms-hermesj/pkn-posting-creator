@@ -201,24 +201,24 @@ function AIFieldItem({
           <div className="flex items-center gap-2 text-xs text-gray-400">
             <span className="w-3 text-right shrink-0">X</span>
             <input
-              type="number" min={0} max={100} step={0.1}
+              type="number" min={-200} max={200} step={0.1}
               value={Math.round(field.x * 1000) / 10}
               className="w-16 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
               {...numericProps(
                 () => Math.round(field.x * 1000) / 10,
                 (v) => updateField({ x: v / 100 }),
-                0.1, 1, 0, 100
+                0.1, 1, -200, 200
               )}
             />
             <span className="w-3 text-right shrink-0">Y</span>
             <input
-              type="number" min={0} max={100} step={0.1}
+              type="number" min={-200} max={200} step={0.1}
               value={Math.round(field.y * 1000) / 10}
               className="w-16 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
               {...numericProps(
                 () => Math.round(field.y * 1000) / 10,
                 (v) => updateField({ y: v / 100 }),
-                0.1, 1, 0, 100
+                0.1, 1, -200, 200
               )}
             />
             {field.type === 'graphic' ? (
