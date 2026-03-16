@@ -307,7 +307,7 @@ function AIFieldList({
   return (
     <div className="pb-2">
       {fields.map((field, i) => {
-        if (field.type === 'graphic' && !field.imageUrl && !field.isImageSlot) return null
+        if (field.type === 'graphic' && !field.imageUrl) return null
         return <AIFieldItem key={i} field={field} index={i} aiImport={aiImport} updateConfig={updateConfig} isSelected={selectedFieldIndex === i} aiImportVariants={aiImportVariants} />
       })}
     </div>

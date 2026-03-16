@@ -1101,9 +1101,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             }
           }
 
-          // Skip non-image-slot graphic layers where extraction produced no content.
-          // Image slots (!-prefixed) are kept even without an image — they're upload placeholders.
-          if (!imageUrl && !isImageSlot) continue
+          if (!imageUrl) continue
 
           extractedFields.push({
             type: 'graphic', layerName, isImageSlot, value: '', originalText: '',
