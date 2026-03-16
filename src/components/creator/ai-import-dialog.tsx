@@ -111,51 +111,79 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const ocgConfig = await pdf.getOptionalContentConfig()
       const firstOpList = await page.getOperatorList()
 
-      // id: string ID (OCG ref like "25R", or synthetic "layer:*Grafik" for sublayers)
-      // isOCG: true = registered OCG (can use setVisibility), false = sublayer marker only
-      const allOCGs: { id: string; name: string; isOCG: boolean }[] = []
+      // id: OCG ref like "25R", or synthetic "layer:*Grafik" for non-OCG BDC sublayers
+      // isOCG: true = registered OCG (setVisibility works), false = BDC marker only
+      // parentId: immediately enclosing layer id, null = top-level
+      const allOCGs: { id: string; name: string; isOCG: boolean; parentId: string | null }[] = []
 
-      for (let j = 0; j < firstOpList.fnArray.length; j++) {
-        if (firstOpList.fnArray[j] === pdfjs.OPS.beginMarkedContentProps) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const args = firstOpList.argsArray[j] as any[]
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const props = args[1] as Record<string, any> | null
-          const tag = String(args[0] ?? '')
+      // Walk the full operator list, tracking BDC/BMC/EMC nesting with a stack so we
+      // know each layer's parent. This is needed to detect children of _-prefixed containers.
+      {
+        const ocgStack: string[] = [] // stack of active layer ids ('' = unnamed/non-layer)
+        const seenOCGIds = new Set<string>()
+        for (let j = 0; j < firstOpList.fnArray.length; j++) {
+          const fn = firstOpList.fnArray[j]
+          if (fn === pdfjs.OPS.beginMarkedContentProps) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const args = firstOpList.argsArray[j] as any[]
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const props = args[1] as Record<string, any> | null
+            const tag = String(args[0] ?? '')
+            const parentId = ocgStack.findLast(s => s !== '') ?? null
 
-          if (tag === 'OC' && props?.id) {
-            // Registered PDF OCG – can use setVisibility()
-            const ocgId = String(props.id)
-            if (!allOCGs.find(g => g.id === ocgId)) {
-              try {
-                const group = ocgConfig.getGroup(ocgId) as { name?: string } | null
-                allOCGs.push({ id: ocgId, name: group?.name ?? ocgId, isOCG: true })
-              } catch {
-                allOCGs.push({ id: ocgId, name: ocgId, isOCG: true })
+            if (tag === 'OC' && props?.id) {
+              const ocgId = String(props.id)
+              ocgStack.push(ocgId)
+              if (!seenOCGIds.has(ocgId)) {
+                seenOCGIds.add(ocgId)
+                try {
+                  const group = ocgConfig.getGroup(ocgId) as { name?: string } | null
+                  allOCGs.push({ id: ocgId, name: group?.name ?? ocgId, isOCG: true, parentId })
+                } catch {
+                  allOCGs.push({ id: ocgId, name: ocgId, isOCG: true, parentId })
+                }
               }
-            }
-          } else if (props) {
-            // Illustrator sublayer marker – name stored in properties dict
-            // Illustrator encodes sublayer names as /Name key in the BDC properties
-            const layerName = String(props.Name ?? props.name ?? props.N ?? '')
-            if (layerName) {
-              const syntheticId = `layer:${layerName}`
-              if (!allOCGs.find(g => g.id === syntheticId)) {
-                allOCGs.push({ id: syntheticId, name: layerName, isOCG: false })
+            } else if (props) {
+              const layerName = String(props.Name ?? props.name ?? props.N ?? '')
+              if (layerName) {
+                const syntheticId = `layer:${layerName}`
+                ocgStack.push(syntheticId)
+                if (!allOCGs.find(g => g.id === syntheticId)) {
+                  allOCGs.push({ id: syntheticId, name: layerName, isOCG: false, parentId })
+                }
+              } else {
+                ocgStack.push('')
               }
+            } else {
+              ocgStack.push('')
             }
+            console.log(`[AI Import] BDC marker: tag="${tag}" id=${props?.id ?? '-'} name=${props?.Name ?? props?.name ?? '-'} parent=${parentId ?? 'top'}`)
+          } else if (fn === pdfjs.OPS.beginMarkedContent) {
+            ocgStack.push('')
+          } else if (fn === pdfjs.OPS.endMarkedContent) {
+            ocgStack.pop()
           }
-
-          // Debug all markers to console
-          console.log(`[AI Import] BDC marker: tag="${tag}" id=${props?.id ?? '-'} name=${props?.Name ?? props?.name ?? '-'}`)
         }
       }
 
-      const starredOCGs = allOCGs.filter(g => g.name.trimStart().startsWith('*') || g.name.trimStart().startsWith('!'))
-      // If no starred OCGs (sublayers not individually exported), fall back to all
-      const effectiveOCGs = starredOCGs.length > 0 ? starredOCGs : allOCGs
+      // Layers named with a leading '_' (e.g. "_16:9") are transparent artboard containers.
+      // The import treats all their direct children as primary editable layers, identical to
+      // how top-level */* layers would normally work. The container itself is never an editable field.
+      const containerIds = new Set(
+        allOCGs.filter(g => g.name.trimStart().startsWith('_')).map(g => g.id)
+      )
 
-      console.log('[AI Import] All OCGs:', allOCGs.map(g => `${g.id} (${g.isOCG ? 'OCG' : 'layer'}): "${g.name}"`))
+      const starredOCGs = allOCGs.filter(g => {
+        const name = g.name.trimStart()
+        if (!name.startsWith('*') && !name.startsWith('!')) return false
+        if (containerIds.size === 0) return true // no containers → all starred are primary (backward-compat)
+        return g.parentId !== null && containerIds.has(g.parentId)
+      })
+      // Fall back to all non-container layers when no starred layers found
+      const effectiveOCGs = starredOCGs.length > 0 ? starredOCGs : allOCGs.filter(g => !containerIds.has(g.id))
+
+      console.log('[AI Import] All OCGs:', allOCGs.map(g => `${g.id} (${g.isOCG ? 'OCG' : 'layer'}): "${g.name}" parent=${g.parentId ?? 'top'}`))
+      console.log('[AI Import] Containers:', Array.from(containerIds))
       console.log('[AI Import] Effective OCGs:', effectiveOCGs.map(g => `${g.id}: "${g.name}"`))
 
       // ── Extract text content, grouped by OCG via marked content markers ────
@@ -200,31 +228,42 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const ungroupedItems: RichItem[] = []
 
       {
-        let currentOCGId: string | null = null
+        // All effective layer ids (OCG ids + synthetic 'layer:X') for quick lookup
+        const effectiveIdSet = new Set(effectiveOCGs.map(g => g.id))
+        let currentLayerId: string | null = null // active layer: OCG id or 'layer:X' synthetic id
         let mcDepth = 0
-        let ocgStartDepth = -1
+        let layerStartDepth = -1
         for (const item of textContent.items) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const it = item as any
           if (it.type === 'beginMarkedContentProps' && it.tag === 'OC') {
             mcDepth++
-            if (currentOCGId === null) {
-              // Use the id field directly, or fall back to checking the properties object
+            if (currentLayerId === null) {
               const ocId = it.id ?? it.properties?.id ?? it.properties?.OCMD?.id ?? null
-              if (ocId) { currentOCGId = String(ocId); ocgStartDepth = mcDepth }
+              if (ocId) { currentLayerId = String(ocId); layerStartDepth = mcDepth }
             }
-          } else if (it.type === 'beginMarkedContent' || it.type === 'beginMarkedContentProps') {
+          } else if (it.type === 'beginMarkedContentProps') {
+            mcDepth++
+            if (currentLayerId === null) {
+              // Also match non-OCG sublayer BDC markers by name (for layers inside _-containers)
+              const name = String(it.properties?.Name ?? it.properties?.name ?? it.properties?.N ?? '')
+              if (name) {
+                const syntheticId = `layer:${name}`
+                if (effectiveIdSet.has(syntheticId)) { currentLayerId = syntheticId; layerStartDepth = mcDepth }
+              }
+            }
+          } else if (it.type === 'beginMarkedContent') {
             mcDepth++
           } else if (it.type === 'endMarkedContent') {
-            if (mcDepth === ocgStartDepth) { currentOCGId = null; ocgStartDepth = -1 }
+            if (mcDepth === layerStartDepth) { currentLayerId = null; layerStartDepth = -1 }
             mcDepth = Math.max(0, mcDepth - 1)
           } else if (typeof it.str === 'string' && it.str.trim()) {
             const [vx, vy] = vp1.convertToViewportPoint(it.transform[4], it.transform[5])
             const fontSize = Math.abs(it.transform[3]) || Math.abs(it.transform[0]) || 12
             const rich: RichItem = { str: it.str, vx, vy, fontSize, width: it.width ?? 0, fontName: it.fontName ?? '' }
-            if (currentOCGId !== null) {
-              if (!ocgTextMap.has(currentOCGId)) ocgTextMap.set(currentOCGId, [])
-              ocgTextMap.get(currentOCGId)!.push(rich)
+            if (currentLayerId !== null) {
+              if (!ocgTextMap.has(currentLayerId)) ocgTextMap.set(currentLayerId, [])
+              ocgTextMap.get(currentLayerId)!.push(rich)
             } else {
               ungroupedItems.push(rich)
             }
@@ -264,10 +303,14 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const artW_px = Math.round(renderVp.width)
       const artH_px = Math.round(renderVp.height)
 
-      // Force all effective OCGs visible for full render (some may default to hidden)
+      // Force all effective OCGs visible for full render (some may default to hidden).
+      // Also ensure any _-container OCGs are visible so their children can be rendered.
       const fullRenderCfg = await pdf.getOptionalContentConfig()
       for (const { id, isOCG } of effectiveOCGs) {
         if (isOCG) try { fullRenderCfg.setVisibility(id, true) } catch { /* unsupported */ }
+      }
+      for (const { id, isOCG } of allOCGs) {
+        if (isOCG && containerIds.has(id)) try { fullRenderCfg.setVisibility(id, true) } catch { /* unsupported */ }
       }
 
       // fullCanvas = artboard-sized render with all layers visible (used for artboard diff fallback)
@@ -309,6 +352,10 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const bgCfg = await pdf.getOptionalContentConfig()
       for (const { id, isOCG } of effectiveOCGs) {
         if (isOCG) try { bgCfg.setVisibility(id, false) } catch { /* unsupported */ }
+      }
+      // Keep _-containers visible so non-starred sublayers (Background etc.) stay rendered
+      for (const { id, isOCG } of allOCGs) {
+        if (isOCG && containerIds.has(id)) try { bgCfg.setVisibility(id, true) } catch { /* unsupported */ }
       }
       const bgCanvas = document.createElement('canvas')
       bgCanvas.width = artW_px
