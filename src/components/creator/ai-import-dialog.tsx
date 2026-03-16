@@ -280,38 +280,17 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         : null
       const containerOCGId = containerOCG?.id ?? null
 
-      // ── Step B: Compute /Order range for this artboard ───────────────────────
-      // The /OCProperties /D /Order array lists ALL layers in Illustrator panel order.
-      // We find the range [containerPos+1, nextMarkerPos) in this flat list to identify
-      // which supplemented OCGs (no BDC markers) belong to this artboard.
-      // This correctly handles *Grafik, !Image, and other graphic layers that Illustrator
-      // writes into /OCProperties but not into the content stream's BDC markers.
-      let orderRangeIds: Set<string> | null = null
-      if (containerOCGId !== null && orderFlatList.length > 0) {
-        const containerPos = orderFlatList.indexOf(containerOCGId)
-        if (containerPos >= 0) {
-          // Find the next _-marker after containerPos in the flat list
-          let nextMarkerPos = orderFlatList.length
-          for (let k = containerPos + 1; k < orderFlatList.length; k++) {
-            const candidateId = orderFlatList[k]
-            // Look up the name from allOCGs (content-stream scan already collected these)
-            const candidateName = allOCGs.find(g => g.id === candidateId)?.name ?? ''
-            if (candidateName.trimStart().startsWith('_')) {
-              nextMarkerPos = k
-              break
-            }
-          }
-          orderRangeIds = new Set(orderFlatList.slice(containerPos + 1, nextMarkerPos))
-          orderRangeIds.add(containerOCGId) // also include the container marker itself
-          console.log('[AI Import] /Order range for artboard', artboard.pageNum, ':', Array.from(orderRangeIds))
-        }
-      }
-
-      // ── Step C: Supplement allOCGs with registered OCGs not found in content stream ─
+      // ── Step B: Supplement allOCGs with registered OCGs not found in content stream ─
       // Illustrator writes some sublayer OCGs (especially graphic/image layers like *Grafik,
       // !Image) into /OCProperties but NOT as active BDC markers in the content stream.
       // ocgConfig[Symbol.iterator] yields [id, OptionalContentGroup] pairs from #groups.
-      // We filter using orderRangeIds so only this artboard's supplemented OCGs are included.
+      //
+      // Supplemented OCGs are almost always graphic/image layers — text layers always appear
+      // as BDC markers. Graphic layers don't need artboard isolation here because the
+      // rendering-based extraction naturally isolates them: an artboard 2 graphic produces
+      // zero pixels on page 1, so the post-extraction guard skips it. Including all
+      // supplemented OCGs is therefore safe; filtering them causes *Grafik/*!Image to be
+      // excluded when they are not in /D/Order (which Illustrator sometimes omits for graphic layers).
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const cfgIter: Iterator<[string, any]> = (ocgConfig as any)[Symbol.iterator]()
@@ -321,13 +300,10 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           const [ocgId, ocgGroup] = cfgStep.value as [string, any]
           cfgStep = cfgIter.next()
           if (!scannedOCGIds.has(ocgId)) {
-            // Only add if: no artboard isolation needed (no markers) OR in this artboard's /Order range
-            if (orderRangeIds === null || orderRangeIds.has(ocgId)) {
-              const name = (ocgGroup as any)?.name ?? ocgId
-              const parentId = ocgParentMap.get(ocgId) ?? null
-              allOCGs.push({ id: ocgId, name, isOCG: true, parentId })
-              console.log(`[AI Import] Supplemented OCG from config: "${name}" (${ocgId})`)
-            }
+            const name = (ocgGroup as any)?.name ?? ocgId
+            const parentId = ocgParentMap.get(ocgId) ?? null
+            allOCGs.push({ id: ocgId, name, isOCG: true, parentId })
+            console.log(`[AI Import] Supplemented OCG from config: "${name}" (${ocgId})`)
           }
         }
       } catch { /* iterator not available in this pdfjs build */ }
@@ -350,14 +326,16 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const nextContainerIdx = nextMarker ? (ocgFirstOccurrence.get(nextMarker.id) ?? Infinity) : Infinity
 
       // Effective OCGs: *-prefixed and !-prefixed layers belonging to this artboard.
-      // Content-stream range filter isolates BDC-present layers; supplemented OCGs (pos=-1)
-      // were already filtered by /Order range in Step C above, so they pass through here.
+      // BDC-found OCGs are isolated by content-stream range (text isolation).
+      // Supplemented OCGs (pos=-1, no BDC markers = graphic/image layers) pass through
+      // unconditionally — rendering on this page produces zero pixels for other artboards,
+      // so the post-extraction guard naturally skips them.
       const effectiveOCGs = allOCGs.filter(g => {
         const name = g.name.trimStart()
         if (!name.startsWith('*') && !name.startsWith('!')) return false
         if (containerOCGId !== null && containerIdx >= 0) {
           const pos = ocgFirstOccurrence.get(g.id) ?? -1
-          if (pos === -1) return true // supplemented OCG — already artboard-filtered in Step C
+          if (pos === -1) return true // supplemented OCG — rendering isolates it
           return pos > containerIdx && pos < nextContainerIdx
         }
         return true // no _-markers → flat single-artboard structure, include all */!-prefixed layers
