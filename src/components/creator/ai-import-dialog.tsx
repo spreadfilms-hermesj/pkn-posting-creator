@@ -303,14 +303,32 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const containerIds = new Set<string>()
       if (containerOCGId) containerIds.add(containerOCGId)
 
+      // Range boundaries for this artboard based on content-stream position.
+      // Illustrator writes artboard layers as flat (non-nested) BDC markers in content-stream order:
+      //   [artboard-n layers (drawn first, lowest idx)] ... [artboard-1 layers (drawn last, highest idx)]
+      // Each _-marker for artboard k precedes its sublayers in the stream.
+      // We isolate exactly this artboard's layers using the range (containerIdx, nextContainerIdx).
+      const containerIdx = containerOCGId ? (ocgFirstOccurrence.get(containerOCGId) ?? -1) : -1
+      // markerOCGs is sorted DESCENDING (artboard 1 = highest idx first). Reverse → ascending order.
+      const markersSortedAsc = [...markerOCGs].reverse()
+      const currentInAsc = markersSortedAsc.findIndex(m => m.id === containerOCGId)
+      const nextMarker = currentInAsc >= 0 ? markersSortedAsc[currentInAsc + 1] : null
+      const nextContainerIdx = nextMarker ? (ocgFirstOccurrence.get(nextMarker.id) ?? Infinity) : Infinity
+
       // Effective OCGs: *-prefixed and !-prefixed layers belonging to this artboard.
-      // When a container marker exists, restrict to its direct children only —
-      // this prevents OCGs from other artboards bleeding into this artboard's field list.
+      // When a container marker exists, use the content-stream range filter — this is the
+      // only reliable isolation method because Illustrator writes all artboard layers flat
+      // (non-nested) in every page's stream, making parent-id and stack-based approaches unreliable.
       const effectiveOCGs = allOCGs.filter(g => {
         const name = g.name.trimStart()
         if (!name.startsWith('*') && !name.startsWith('!')) return false
-        if (containerOCGId !== null) return g.parentId === containerOCGId || g.parentId === null
-        return true // no container markers → include all */* layers (flat structure)
+        if (containerOCGId !== null && containerIdx >= 0) {
+          // Include only OCGs whose first stream appearance is strictly between this artboard's
+          // _-marker and the next artboard's _-marker (or end of stream for artboard 1).
+          const pos = ocgFirstOccurrence.get(g.id) ?? -1
+          return pos > containerIdx && pos < nextContainerIdx
+        }
+        return true // no _-markers → flat single-artboard structure, include all */!-prefixed layers
       })
 
       console.log('[AI Import] Container marker:', containerOCG ? `"${containerOCG.name}" (${containerOCGId})` : 'none (flat structure)')
@@ -666,20 +684,6 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
       } catch (e) {
         console.warn('[AI Import] Operator list analysis failed:', e)
-      }
-
-      // Remove supplemented null-parent OCGs that have no operator-list presence on this page.
-      // The supplement adds ALL document-level OCGs (shared across artboards), but only this
-      // artboard's OCGs will have BDC markers in this page's content stream → ocgFirstIdx set.
-      // OCGs with no ocgFirstIdx entry belong to other artboards and must be pruned.
-      if (containerOCGId !== null) {
-        for (let ei = effectiveOCGs.length - 1; ei >= 0; ei--) {
-          const ocg = effectiveOCGs[ei]
-          if (supplementedOCGIds.has(ocg.id) && ocg.parentId === null && !ocgFirstIdx.has(ocg.id)) {
-            console.log(`[AI Import] Removing absent supplemented OCG: "${ocg.name}"`)
-            effectiveOCGs.splice(ei, 1)
-          }
-        }
       }
 
       console.log('[AI Import] OCG text classification:', Array.from(ocgIsText.entries()).map(([id, t]) => {
