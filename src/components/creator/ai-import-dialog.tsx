@@ -51,6 +51,8 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       pdfDocRef.current = pdf
 
       const pageLabels = await pdf.getPageLabels().catch(() => null)
+      // Fetch OCG config once — used to resolve OCG names for artboard detection
+      const ocgCfgForNames = await pdf.getOptionalContentConfig().catch(() => null)
       const boards: ArtboardInfo[] = []
 
       for (let i = 1; i <= pdf.numPages; i++) {
@@ -70,21 +72,45 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         // Prefer page label if it looks like a real name (not just a page number)
         let name = pageLabel && !/^\d+$/.test(pageLabel.trim()) ? pageLabel : null
 
-        // Try Illustrator's /VP ViewportDictionary — stores artboard names as /Name entries
+        // Try Illustrator's /VP ViewportDictionary (pdfjs internal)
         if (!name) {
           try {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const rawPage = page as any
             const pd = rawPage._pageDict ?? rawPage.pageDict
-            const vp = typeof pd?.get === 'function' ? pd.get('VP') : null
-            if (vp) {
-              const vpArr = Array.isArray(vp) ? vp : [vp]
+            const vpEntry = typeof pd?.get === 'function' ? pd.get('VP') : null
+            if (vpEntry) {
+              const vpArr = Array.isArray(vpEntry) ? vpEntry : [vpEntry]
               for (const entry of vpArr) {
                 const n = typeof entry?.get === 'function' ? entry.get('Name') : entry?.Name
-                if (n && typeof n === 'string' && n.trim().length > 0) { name = n.trim(); break }
+                if (n && typeof n === 'string' && n.trim()) { name = n.trim(); break }
               }
             }
-          } catch { /* VP not accessible in this pdfjs build */ }
+          } catch { /* VP not accessible */ }
+        }
+
+        // Scan operator list for the first non-starred OCG — in Illustrator files,
+        // the outermost OCG on each page is the artboard container layer (e.g. _01_Posting_16:9)
+        // which carries the artboard name. Strip leading underscores Illustrator adds.
+        if (!name && ocgCfgForNames) {
+          try {
+            const ops = await page.getOperatorList()
+            for (let j = 0; j < ops.fnArray.length; j++) {
+              if (ops.fnArray[j] === pdfjs.OPS.beginMarkedContentProps) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const args = ops.argsArray[j] as any[]
+                if (String(args[0] ?? '') === 'OC' && args[1]?.id) {
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  const grp = ocgCfgForNames.getGroup(String(args[1].id)) as { name?: string } | null
+                  const n = grp?.name?.trim()
+                  if (n && !n.startsWith('*') && !n.startsWith('!')) {
+                    name = n.replace(/^_+/, '').trim()
+                    break
+                  }
+                }
+              }
+            }
+          } catch { /* operator list scan failed */ }
         }
 
         if (!name) {
@@ -219,6 +245,11 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       // Illustrator sometimes writes sublayer OCGs (especially graphic/image layers) without
       // active BDC markers in the visible content stream, so they would be missed above.
       // ocgConfig[Symbol.iterator] yields [id, OptionalContentGroup] pairs from #groups (all registered OCGs).
+      //
+      // IMPORTANT: OCGs are document-level (shared across all pages/artboards). We track
+      // supplemented IDs here so we can later remove any that have no operator-list presence
+      // on this specific page — those belong to other artboards and would cause cross-artboard bleed.
+      const supplementedOCGIds = new Set<string>()
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const cfgIter: Iterator<[string, any]> = (ocgConfig as any)[Symbol.iterator]()
@@ -230,6 +261,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           if (!scannedOCGIds.has(ocgId)) {
             const name = (ocgGroup as any)?.name ?? ocgId
             allOCGs.push({ id: ocgId, name, isOCG: true, parentId: null })
+            supplementedOCGIds.add(ocgId)
             console.log(`[AI Import] Supplemented OCG from config: "${name}" (${ocgId})`)
           }
         }
@@ -603,6 +635,18 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       console.log('[AI Import] OCG has-image:', Array.from(ocgHasImage.entries()).map(([id, v]) => `${effectiveOCGs.find(g=>g.id===id)?.name ?? id}: ${v}`))
       console.log('[AI Import] OCG parent ids:', Array.from(ocgParentId.entries()))
       console.log('[AI Import] OCG path bboxes:', Array.from(ocgPathBBox.entries()))
+
+      // Remove supplemented OCGs that have no operator-list presence on this page.
+      // These were added from the document-level OCG config and belong to OTHER artboards.
+      // Any OCG with actual content on this page will have been found by the operator scan
+      // (via BDC beginMarkedContentProps) and will have an entry in ocgFirstIdx.
+      for (let ei = effectiveOCGs.length - 1; ei >= 0; ei--) {
+        const ocg = effectiveOCGs[ei]
+        if (supplementedOCGIds.has(ocg.id) && !ocgFirstIdx.has(ocg.id)) {
+          console.log(`[AI Import] Removing cross-artboard OCG: "${ocg.name}" (${ocg.id}) — not present on this page`)
+          effectiveOCGs.splice(ei, 1)
+        }
+      }
 
       // Separate and order OCGs
       // Sort in DESCENDING ocgFirstIdx order: PDF draws bottom-to-top, so descending = Illustrator top-to-bottom layer order
