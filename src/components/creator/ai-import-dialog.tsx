@@ -180,30 +180,16 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         return 400 // regular / normal
       }
 
-      // Build a fontName (pdfjs loadedName) → weight map using the actual PostScript
-      // names stored in page.commonObjs after getOperatorList() resolved the page.
-      // This is the only reliable source because textContent.styles.fontFamily returns
-      // generated IDs (e.g. "g_d0_f1") for embedded fonts, not the PostScript name.
+      // fontWeightMap is populated after the first page.render() call below,
+      // because pdfjs only finishes binding fonts into commonObjs during rendering.
+      // PDFObjects exposes a public Symbol.iterator → [objId, FontFaceObject] pairs.
       const fontWeightMap = new Map<string, number>()
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const objs: Record<string, any> = (page as any).commonObjs?._objs ?? {}
-        for (const [key, val] of Object.entries(objs)) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const psName: string | undefined = (val as any)?.data?.name
-          if (typeof psName === 'string' && psName) {
-            const w = parseFontWeight(psName)
-            fontWeightMap.set(key, w)
-            console.log(`[AI Import] Font "${key}" → psName="${psName}" → weight ${w}`)
-          }
-        }
-      } catch { /* private API not available; fall through to textStyles fallback */ }
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const textStyles = (textContent as any).styles as Record<string, { fontFamily: string }> ?? {}
 
-      // Resolve font weight for a given pdfjs fontName: prefer commonObjs PostScript name,
-      // fall back to textStyles.fontFamily (works for non-embedded system fonts).
+      // Resolve font weight: commonObjs PostScript name (populated after first render)
+      // → textStyles.fontFamily fallback (works for non-embedded system fonts).
       const getFontWeight = (fontName: string): number =>
         fontWeightMap.get(fontName) ?? parseFontWeight(textStyles[fontName]?.fontFamily ?? fontName)
 
@@ -289,6 +275,34 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       fullCanvas.width = artW_px; fullCanvas.height = artH_px
       const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true })!
       await page.render({ canvas: fullCanvas, canvasContext: fullCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(fullRenderCfg) }).promise
+
+      // ── Build font-weight map from pdfjs commonObjs ───────────────────────
+      // After the first render, pdfjs has fully loaded all fonts into commonObjs.
+      // PDFObjects exposes Symbol.iterator yielding [objId, FontFaceObject] pairs.
+      // FontFaceObject.name is the PostScript name (e.g. "VazirmatnBlack").
+      // FontFaceObject.bold and .black are boolean flags set by pdfjs font analysis.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const iter: Iterator<[string, any]> = (page as any).commonObjs[Symbol.iterator]()
+        let step = iter.next()
+        while (!step.done) {
+          const [objId, fontObj] = step.value as [string, any]
+          step = iter.next();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const fo = fontObj as any
+          if (!fo || typeof fo !== 'object') continue
+          // Prefer boolean flags (most reliable), fall back to PostScript name parsing
+          let w: number
+          if (fo.black === true)       w = 900
+          else if (fo.bold === true)   w = 700
+          else {
+            const psName: string = fo.name ?? ''
+            w = psName ? parseFontWeight(psName) : 400
+          }
+          fontWeightMap.set(objId, w)
+          console.log(`[AI Import] Font "${objId}" name="${fo.name ?? ''}" bold=${fo.bold} black=${fo.black} → weight ${w}`)
+        }
+      } catch { /* iterator not available in this pdfjs build */ }
 
       // ── Render background (all effective OCG layers hidden) ───────────────
       // bgCanvas is artboard-sized only — used as the displayed background image
