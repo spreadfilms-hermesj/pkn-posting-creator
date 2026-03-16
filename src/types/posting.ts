@@ -30,6 +30,11 @@ export interface AIImportData {
   editableFields: AIEditableField[]
 }
 
+export interface AIImportVariants {
+  variants: AIImportData[]
+  activeVariantIndex: number
+}
+
 export interface BrandSettings {
   logo: string | null
   logoText: string
@@ -113,6 +118,7 @@ export interface PostingConfig {
 
   // AI Import
   aiImport: AIImportData | null
+  aiImportVariants: AIImportVariants | null
 }
 
 export const defaultBrandSettings: BrandSettings = {
@@ -158,6 +164,7 @@ export const defaultConfig: PostingConfig = {
   carouselSlides: [],
   currentSlideIndex: 0,
   aiImport: null,
+  aiImportVariants: null,
 }
 
 export const FORMAT_DIMENSIONS: Record<Format, { width: number; height: number }> = {

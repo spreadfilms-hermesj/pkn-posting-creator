@@ -47,7 +47,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
   )
 }
 
-import type { AIImportData, AIEditableField } from '@/types/posting'
+import type { AIImportData, AIEditableField, AIImportVariants } from '@/types/posting'
 
 function AIFieldItem({
   field,
@@ -55,12 +55,14 @@ function AIFieldItem({
   aiImport,
   updateConfig,
   isSelected,
+  aiImportVariants,
 }: {
   field: AIEditableField
   index: number
   aiImport: AIImportData
   updateConfig: (updates: Partial<PostingConfig>) => void
   isSelected: boolean
+  aiImportVariants: AIImportVariants | null
 }) {
   const [open, setOpen] = useState(true)
   const ref = React.useRef<HTMLDivElement>(null)
@@ -84,10 +86,33 @@ function AIFieldItem({
   const imageInputRef = useRef<HTMLInputElement>(null)
 
   const updateField = (updates: Partial<AIEditableField>) => {
-    const updated = aiImport.editableFields.map((f, fi) =>
+    const updatedFields = aiImport.editableFields.map((f, fi) =>
       fi === index ? { ...f, ...updates } : f
     )
-    updateConfig({ aiImport: { ...aiImport, editableFields: updated } })
+    const updatedAiImport = { ...aiImport, editableFields: updatedFields }
+
+    // Sync text value changes to matching layers in all other variants
+    if ('value' in updates && aiImportVariants && updates.value !== undefined) {
+      const thisLayerName = field.layerName
+      const syncedVariants = aiImportVariants.variants.map((v, vi) => {
+        if (vi === aiImportVariants.activeVariantIndex) return updatedAiImport
+        return {
+          ...v,
+          editableFields: v.editableFields.map(f2 =>
+            f2.type === 'text' && f2.layerName === thisLayerName
+              ? { ...f2, value: updates.value! }
+              : f2
+          ),
+        }
+      })
+      updateConfig({
+        aiImport: updatedAiImport,
+        aiImportVariants: { ...aiImportVariants, variants: syncedVariants },
+      })
+      return
+    }
+
+    updateConfig({ aiImport: updatedAiImport })
   }
 
   const handleImageReplace = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -264,11 +289,13 @@ function AIFieldList({
   aiImport,
   updateConfig,
   selectedFieldIndex,
+  aiImportVariants,
 }: {
   fields: AIEditableField[]
   aiImport: AIImportData
   updateConfig: (updates: Partial<PostingConfig>) => void
   selectedFieldIndex: number | null
+  aiImportVariants: AIImportVariants | null
 }) {
   if (fields.length === 0) {
     return (
@@ -280,7 +307,7 @@ function AIFieldList({
   return (
     <div className="pb-2">
       {fields.map((field, i) => (
-        <AIFieldItem key={i} field={field} index={i} aiImport={aiImport} updateConfig={updateConfig} isSelected={selectedFieldIndex === i} />
+        <AIFieldItem key={i} field={field} index={i} aiImport={aiImport} updateConfig={updateConfig} isSelected={selectedFieldIndex === i} aiImportVariants={aiImportVariants} />
       ))}
     </div>
   )
@@ -318,13 +345,13 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex }: Cre
                 </span>
               </div>
               <button
-                onClick={() => updateConfig({ aiImport: null })}
+                onClick={() => updateConfig({ aiImport: null, aiImportVariants: null })}
                 className="text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg border border-red-500/20 transition-all"
               >
                 Entfernen
               </button>
             </div>
-            <AIFieldList fields={config.aiImport.editableFields} aiImport={config.aiImport} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} />
+            <AIFieldList fields={config.aiImport.editableFields} aiImport={config.aiImport} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} aiImportVariants={config.aiImportVariants ?? null} />
 
           </div>
         )}

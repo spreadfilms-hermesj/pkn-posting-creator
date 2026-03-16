@@ -6,7 +6,7 @@ import type { AIImportData, AIEditableField } from '@/types/posting'
 import { Label } from '@/components/ui/label'
 
 interface AIImportDialogProps {
-  onImport: (data: AIImportData) => void
+  onImport: (variants: AIImportData[]) => void
   onClose: () => void
 }
 
@@ -26,9 +26,10 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [artboards, setArtboards] = useState<ArtboardInfo[]>([])
-  const [selectedArtboard, setSelectedArtboard] = useState<ArtboardInfo | null>(null)
-  const [fields, setFields] = useState<AIEditableField[]>([])
-  const [backgroundUrl, setBackgroundUrl] = useState<string>('')
+  const [selectedArtboards, setSelectedArtboards] = useState<Set<number>>(new Set())
+  const [processedVariants, setProcessedVariants] = useState<AIImportData[]>([])
+  const [processingProgress, setProcessingProgress] = useState<{ current: number; total: number } | null>(null)
+  const [activePreviewIndex, setActivePreviewIndex] = useState(0)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pdfDocRef = useRef<any>(null)
@@ -82,6 +83,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       }
 
       setArtboards(boards)
+      setSelectedArtboards(new Set(boards.map(b => b.pageNum)))
       setStep('artboards')
     } catch {
       setError(
@@ -94,11 +96,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
   // ── Step 2: render background + extract editable fields ───────────────────
 
-  const processArtboard = useCallback(async (artboard: ArtboardInfo) => {
-    setIsLoading(true)
-    setError(null)
-    setSelectedArtboard(artboard)
-
+  const processArtboardData = useCallback(async (artboard: ArtboardInfo): Promise<AIImportData> => {
     try {
       const pdfjs = await import('pdfjs-dist')
       const pdf = pdfDocRef.current
@@ -1054,29 +1052,53 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         bgCtx.putImageData(bgImgData, 0, 0)
       }
 
-      setBackgroundUrl(bgCanvas.toDataURL('image/png'))
-
-      setFields(extractedFields)
-      setStep('fields')
+      return {
+        backgroundImageUrl: bgCanvas.toDataURL('image/png'),
+        artboardWidth: artboard.width,
+        artboardHeight: artboard.height,
+        artboardName: artboard.name,
+        editableFields: extractedFields,
+      }
     } catch (err) {
-      console.error(err)
-      setError('Artboard konnte nicht verarbeitet werden.')
-    } finally {
-      setIsLoading(false)
+      console.error('[AI Import] processArtboardData error:', err)
+      throw err
     }
   }, [])
+
+  // ── Process all selected artboards ────────────────────────────────────────
+
+  const processSelectedArtboards = useCallback(async () => {
+    const boards = artboards.filter(b => selectedArtboards.has(b.pageNum))
+    if (boards.length === 0) return
+    setIsLoading(true)
+    setError(null)
+    setProcessingProgress({ current: 0, total: boards.length })
+    const results: AIImportData[] = []
+    for (let i = 0; i < boards.length; i++) {
+      setProcessingProgress({ current: i + 1, total: boards.length })
+      try {
+        const result = await processArtboardData(boards[i])
+        results.push(result)
+      } catch {
+        console.warn(`[AI Import] Skipping artboard "${boards[i].name}" due to error`)
+      }
+    }
+    setIsLoading(false)
+    setProcessingProgress(null)
+    if (results.length === 0) {
+      setError('Kein Artboard konnte verarbeitet werden.')
+      return
+    }
+    setProcessedVariants(results)
+    setActivePreviewIndex(0)
+    setStep('fields')
+  }, [artboards, selectedArtboards, processArtboardData])
 
   // ── Final import ──────────────────────────────────────────────────────────
 
   const handleImport = () => {
-    if (!selectedArtboard) return
-    onImport({
-      backgroundImageUrl: backgroundUrl,
-      artboardWidth: selectedArtboard.width,
-      artboardHeight: selectedArtboard.height,
-      artboardName: selectedArtboard.name,
-      editableFields: fields,
-    })
+    if (processedVariants.length === 0) return
+    onImport(processedVariants)
   }
 
   // ── Event handlers ────────────────────────────────────────────────────────
@@ -1094,18 +1116,58 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
   }
 
   const updateFieldValue = (index: number, value: string) => {
-    setFields((prev) => prev.map((f, i) => (i === index ? { ...f, value } : f)))
+    setProcessedVariants(prev => {
+      const updated = prev.map(v => ({ ...v, editableFields: [...v.editableFields] }))
+      const thisLayerName = updated[activePreviewIndex].editableFields[index]?.layerName
+      // Update active variant
+      updated[activePreviewIndex].editableFields[index] = {
+        ...updated[activePreviewIndex].editableFields[index], value
+      }
+      // Sync to matching text layers in other variants
+      if (thisLayerName) {
+        for (let vi = 0; vi < updated.length; vi++) {
+          if (vi === activePreviewIndex) continue
+          updated[vi].editableFields = updated[vi].editableFields.map(f =>
+            f.type === 'text' && f.layerName === thisLayerName ? { ...f, value } : f
+          )
+        }
+      }
+      return updated
+    })
   }
 
   const resetFieldValue = (index: number) => {
-    setFields((prev) => prev.map((f, i) => (i === index ? { ...f, value: f.originalText } : f)))
+    setProcessedVariants(prev => {
+      const updated = prev.map(v => ({ ...v, editableFields: [...v.editableFields] }))
+      const thisLayerName = updated[activePreviewIndex].editableFields[index]?.layerName
+      const origText = updated[activePreviewIndex].editableFields[index]?.originalText ?? ''
+      updated[activePreviewIndex].editableFields[index] = {
+        ...updated[activePreviewIndex].editableFields[index], value: origText
+      }
+      if (thisLayerName) {
+        for (let vi = 0; vi < updated.length; vi++) {
+          if (vi === activePreviewIndex) continue
+          updated[vi].editableFields = updated[vi].editableFields.map(f =>
+            f.type === 'text' && f.layerName === thisLayerName ? { ...f, value: f.originalText } : f
+          )
+        }
+      }
+      return updated
+    })
   }
 
   const resetAllFields = () => {
-    setFields((prev) => prev.map((f) => ({ ...f, value: f.originalText })))
+    setProcessedVariants(prev =>
+      prev.map(v => ({ ...v, editableFields: v.editableFields.map(f => ({ ...f, value: f.originalText })) }))
+    )
   }
 
-  const hasAnyChange = fields.some((f) => f.type === 'text' && f.value !== f.originalText)
+  const activeVariant = processedVariants[activePreviewIndex] ?? null
+  const fields = activeVariant?.editableFields ?? []
+  const backgroundUrl = activeVariant?.backgroundImageUrl ?? ''
+  const hasAnyChange = processedVariants.some(v =>
+    v.editableFields.some(f => f.type === 'text' && f.value !== f.originalText)
+  )
 
   // ── UI ────────────────────────────────────────────────────────────────────
 
@@ -1119,7 +1181,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             <h2 className="text-lg font-bold text-white">Illustrator Import</h2>
             <p className="text-xs text-cyan-400 mt-0.5">
               {step === 'upload' && 'Schritt 1 — .ai Datei hochladen'}
-              {step === 'artboards' && 'Schritt 2 — Artboard auswählen'}
+              {step === 'artboards' && 'Schritt 2 — Artboards auswählen'}
               {step === 'fields' && 'Schritt 3 — Felder überprüfen & importieren'}
             </p>
           </div>
@@ -1178,31 +1240,71 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           {step === 'artboards' && (
             <div className="space-y-4">
               {isLoading ? (
-                <div className="flex justify-center py-12">
+                <div className="flex flex-col items-center gap-3 py-12">
                   <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+                  {processingProgress && (
+                    <p className="text-gray-400 text-sm">
+                      Artboard {processingProgress.current} von {processingProgress.total} wird verarbeitet…
+                    </p>
+                  )}
                 </div>
               ) : (
                 <>
-                  <p className="text-gray-400 text-sm">
-                    {artboards.length === 1
-                      ? 'Eine Seite gefunden — Artboard bestätigen:'
-                      : `${artboards.length} Artboards gefunden — welchen möchtest du importieren?`}
-                  </p>
-                  <div className="grid grid-cols-2 gap-3">
-                    {artboards.map((board) => (
+                  <div className="flex items-center justify-between">
+                    <p className="text-gray-400 text-sm">
+                      {artboards.length === 1
+                        ? 'Eine Seite gefunden:'
+                        : `${artboards.length} Artboards gefunden — wähle aus, welche du importieren möchtest:`}
+                    </p>
+                    {artboards.length > 1 && (
                       <button
-                        key={board.pageNum}
-                        onClick={() => processArtboard(board)}
-                        className="group text-left border border-white/10 hover:border-cyan-400 bg-white/5 hover:bg-cyan-500/10 rounded-xl p-3 transition-all"
+                        onClick={() => setSelectedArtboards(
+                          selectedArtboards.size === artboards.length
+                            ? new Set()
+                            : new Set(artboards.map(b => b.pageNum))
+                        )}
+                        className="text-xs text-cyan-400 hover:text-cyan-300 transition-colors"
                       >
-                        <div className="flex justify-center mb-3 bg-black/30 rounded-lg overflow-hidden">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img src={board.thumbUrl} alt={board.name} className="max-h-24 object-contain" />
-                        </div>
-                        <p className="text-white text-sm font-semibold truncate">{board.name}</p>
-                        <p className="text-gray-500 text-xs">{board.width} × {board.height} px</p>
+                        {selectedArtboards.size === artboards.length ? 'Alle abwählen' : 'Alle auswählen'}
                       </button>
-                    ))}
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {artboards.map((board) => {
+                      const isSelected = selectedArtboards.has(board.pageNum)
+                      return (
+                        <button
+                          key={board.pageNum}
+                          onClick={() => {
+                            setSelectedArtboards(prev => {
+                              const next = new Set(prev)
+                              if (next.has(board.pageNum)) next.delete(board.pageNum)
+                              else next.add(board.pageNum)
+                              return next
+                            })
+                          }}
+                          className={`text-left rounded-xl p-3 transition-all border ${
+                            isSelected
+                              ? 'border-cyan-400 bg-cyan-500/10'
+                              : 'border-white/10 hover:border-white/30 bg-white/5 hover:bg-white/8'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between mb-2">
+                            <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                              isSelected ? 'border-cyan-400 bg-cyan-500' : 'border-white/30'
+                            }`}>
+                              {isSelected && <span className="text-white text-[10px] font-bold leading-none">✓</span>}
+                            </div>
+                          </div>
+                          <div className="flex justify-center mb-3 bg-black/30 rounded-lg overflow-hidden">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={board.thumbUrl} alt={board.name} className="max-h-24 object-contain" />
+                          </div>
+                          <p className={`text-sm font-semibold truncate ${isSelected ? 'text-white' : 'text-gray-300'}`}>{board.name}</p>
+                          <p className="text-gray-500 text-xs">{board.width} × {board.height} px</p>
+                        </button>
+                      )
+                    })}
                   </div>
                 </>
               )}
@@ -1225,12 +1327,38 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                 </div>
               ) : (
                 <>
+                  {/* Artboard tabs — shown when multiple variants */}
+                  {processedVariants.length > 1 && (
+                    <div className="flex gap-2 flex-wrap">
+                      {processedVariants.map((v, i) => (
+                        <button
+                          key={i}
+                          onClick={() => setActivePreviewIndex(i)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                            i === activePreviewIndex
+                              ? 'bg-cyan-500/30 text-cyan-300 border border-cyan-500/50'
+                              : 'bg-white/5 text-gray-400 border border-white/10 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          {v.artboardName}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Artboard preview */}
                   {backgroundUrl && (
                     <div className="flex justify-center bg-black/40 rounded-xl overflow-hidden border border-white/10">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={backgroundUrl} alt="Artboard Preview" className="max-h-48 object-contain" />
                     </div>
+                  )}
+
+                  {/* Cross-artboard sync hint */}
+                  {processedVariants.length > 1 && (
+                    <p className="text-xs text-cyan-400/70 bg-cyan-500/5 border border-cyan-500/20 rounded-lg px-3 py-2">
+                      Text-Änderungen werden automatisch auf alle {processedVariants.length} Artboards übertragen.
+                    </p>
                   )}
 
                   {fields.length === 0 ? (
@@ -1242,7 +1370,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
                         <p className="text-sm text-gray-400">
-                          <span className="text-cyan-400 font-semibold">{fields.length} editierbare Felder</span> erkannt — Texte jetzt anpassen oder später im Editor ändern:
+                          <span className="text-cyan-400 font-semibold">{fields.length} editierbare Felder</span> erkannt{processedVariants.length > 1 ? ` (Artboard: ${activeVariant?.artboardName})` : ''} — Texte jetzt anpassen oder später im Editor ändern:
                         </p>
                         {hasAnyChange && (
                           <button
@@ -1306,6 +1434,23 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         </div>
 
         {/* Footer */}
+        {step === 'artboards' && !isLoading && (
+          <div className="px-6 py-4 border-t border-white/10 flex justify-between items-center">
+            <span className="text-sm text-gray-400">
+              {selectedArtboards.size === 0
+                ? 'Kein Artboard ausgewählt'
+                : `${selectedArtboards.size} Artboard${selectedArtboards.size !== 1 ? 's' : ''} ausgewählt`}
+            </span>
+            <button
+              onClick={processSelectedArtboards}
+              disabled={selectedArtboards.size === 0}
+              className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold text-sm hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-cyan-500/30"
+            >
+              Weiter
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         {step === 'fields' && !isLoading && (
           <div className="px-6 py-4 border-t border-white/10 flex justify-between items-center">
             <button
@@ -1319,7 +1464,9 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
               className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 text-white font-semibold text-sm hover:opacity-90 transition-all shadow-lg shadow-cyan-500/30"
             >
               <FileCheck className="w-4 h-4" />
-              Importieren
+              {processedVariants.length > 1
+                ? `${processedVariants.length} Artboards importieren`
+                : 'Importieren'}
               <ChevronRight className="w-4 h-4" />
             </button>
           </div>
