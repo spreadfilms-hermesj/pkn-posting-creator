@@ -111,13 +111,41 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const ocgConfig = await pdf.getOptionalContentConfig()
       const firstOpList = await page.getOperatorList()
 
+      // Build OCG parent-child map from the PDF's /OCProperties/D/Order array.
+      // Illustrator exports ALL layers (including sublayers) as FLAT sequential OCGs in the
+      // content stream — they are NOT nested in BDC/EMC blocks. The true hierarchy is only
+      // encoded in the /Order array. Format: ["id1", "id2", ["child_a", "child_b"], "id3"]
+      // where an array immediately following an id represents that id's children.
+      const ocgParentMap = new Map<string, string | null>()
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const orderArr = (ocgConfig as any).getOrder?.()
+        if (Array.isArray(orderArr)) {
+          const parseOrder = (arr: unknown[], parentId: string | null) => {
+            let prev: string | null = null
+            for (const item of arr) {
+              if (typeof item === 'string') {
+                ocgParentMap.set(item, parentId)
+                prev = item
+              } else if (Array.isArray(item) && prev !== null) {
+                parseOrder(item as unknown[], prev)
+                prev = null
+              }
+            }
+          }
+          parseOrder(orderArr, null)
+          console.log('[AI Import] OCG order map:', Array.from(ocgParentMap.entries()).map(([k, v]) => `${k} → ${v ?? 'top'}`))
+        }
+      } catch { /* getOrder not available; content-stream stack used as fallback */ }
+
       // id: OCG ref like "25R", or synthetic "layer:*Grafik" for non-OCG BDC sublayers
       // isOCG: true = registered OCG (setVisibility works), false = BDC marker only
-      // parentId: immediately enclosing layer id, null = top-level
+      // parentId: from /Order hierarchy (ocgParentMap) for OCGs, or content-stream stack for BDC sublayers
       const allOCGs: { id: string; name: string; isOCG: boolean; parentId: string | null }[] = []
 
-      // Walk the full operator list, tracking BDC/BMC/EMC nesting with a stack so we
-      // know each layer's parent. This is needed to detect children of _-prefixed containers.
+      // Walk the operator list to collect all layer ids and names.
+      // For registered OCGs: parentId comes from ocgParentMap (reliable /Order hierarchy).
+      // For non-OCG BDC sublayers: parentId comes from the content-stream nesting stack (fallback).
       {
         const ocgStack: string[] = [] // stack of active layer ids ('' = unnamed/non-layer)
         const seenOCGIds = new Set<string>()
@@ -129,13 +157,16 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const props = args[1] as Record<string, any> | null
             const tag = String(args[0] ?? '')
-            const parentId = ocgStack.findLast(s => s !== '') ?? null
+            const stackParentId = ocgStack.findLast(s => s !== '') ?? null
 
             if (tag === 'OC' && props?.id) {
               const ocgId = String(props.id)
               ocgStack.push(ocgId)
               if (!seenOCGIds.has(ocgId)) {
                 seenOCGIds.add(ocgId)
+                // Use /Order hierarchy (ocgParentMap) as the authoritative source for parentId.
+                // Illustrator writes OCGs flat in the content stream, so the stack is unreliable.
+                const parentId = ocgParentMap.has(ocgId) ? ocgParentMap.get(ocgId)! : stackParentId
                 try {
                   const group = ocgConfig.getGroup(ocgId) as { name?: string } | null
                   allOCGs.push({ id: ocgId, name: group?.name ?? ocgId, isOCG: true, parentId })
@@ -149,7 +180,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                 const syntheticId = `layer:${layerName}`
                 ocgStack.push(syntheticId)
                 if (!allOCGs.find(g => g.id === syntheticId)) {
-                  allOCGs.push({ id: syntheticId, name: layerName, isOCG: false, parentId })
+                  allOCGs.push({ id: syntheticId, name: layerName, isOCG: false, parentId: stackParentId })
                 }
               } else {
                 ocgStack.push('')
@@ -157,7 +188,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             } else {
               ocgStack.push('')
             }
-            console.log(`[AI Import] BDC marker: tag="${tag}" id=${props?.id ?? '-'} name=${props?.Name ?? props?.name ?? '-'} parent=${parentId ?? 'top'}`)
+            console.log(`[AI Import] BDC marker: tag="${tag}" id=${props?.id ?? '-'} name=${props?.Name ?? props?.name ?? '-'} parent=${stackParentId ?? 'top'}`)
           } else if (fn === pdfjs.OPS.beginMarkedContent) {
             ocgStack.push('')
           } else if (fn === pdfjs.OPS.endMarkedContent) {
