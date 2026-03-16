@@ -33,6 +33,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pdfDocRef = useRef<any>(null)
+  const fileBytesRef = useRef<Uint8Array | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Step 1: parse the file and list artboards ─────────────────────────────
@@ -47,7 +48,9 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`
 
       const arrayBuffer = await file.arrayBuffer()
-      const pdf = await pdfjs.getDocument({ data: new Uint8Array(arrayBuffer) }).promise
+      const fileBytes = new Uint8Array(arrayBuffer)
+      fileBytesRef.current = fileBytes
+      const pdf = await pdfjs.getDocument({ data: fileBytes }).promise
       pdfDocRef.current = pdf
 
       const pageLabels = await pdf.getPageLabels().catch(() => null)
@@ -152,8 +155,139 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
   const processArtboardData = useCallback(async (artboard: ArtboardInfo): Promise<AIImportData> => {
     try {
       const pdfjs = await import('pdfjs-dist')
-      const pdf = pdfDocRef.current
-      const page = await pdf.getPage(artboard.pageNum)
+
+      // ── Phase 0: create a clean per-artboard PDF using pdf-lib ───────────────
+      // When a multi-artboard file is imported, all artboard OCGs are document-level
+      // and appear in every page's content stream. This causes cross-artboard bleed
+      // (other artboards' layers being detected as editable fields).
+      //
+      // Fix: pre-scan the original PDF to find which OCG names belong to this artboard
+      // (using the _-marker range heuristic), then use pdf-lib to create a new
+      // single-page PDF whose /OCProperties only contains this artboard's OCGs.
+      // pdfjs processes the clean PDF — supplement and getGroup only see relevant OCGs.
+      let cleanPdfBytes: Uint8Array | null = null
+      if (fileBytesRef.current) {
+        try {
+          const { PDFDocument, PDFName, PDFDict } = await import('pdf-lib')
+          const origDoc = await PDFDocument.load(fileBytesRef.current)
+
+          // Pre-scan the ORIGINAL page's operator list to find the in-range OCG names
+          // for this artboard, using the _-marker boundary convention.
+          const origPdf = pdfDocRef.current
+          const origPage = await origPdf.getPage(artboard.pageNum)
+          const origOcgConfig = await origPdf.getOptionalContentConfig()
+          const origOpList = await origPage.getOperatorList()
+
+          // Collect OCG first-occurrence positions in the content stream
+          const preOcgFirstOcc = new Map<string, number>()
+          const preOcgNames = new Map<string, string>() // id → name
+          const preSeen = new Set<string>()
+          for (let j = 0; j < origOpList.fnArray.length; j++) {
+            if (origOpList.fnArray[j] === pdfjs.OPS.beginMarkedContentProps) {
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const args = origOpList.argsArray[j] as any[]
+              if (String(args[0] ?? '') === 'OC' && args[1]?.id) {
+                const id = String(args[1].id)
+                if (!preSeen.has(id)) {
+                  preSeen.add(id)
+                  preOcgFirstOcc.set(id, j)
+                  try {
+                    const grp = origOcgConfig.getGroup(id) as { name?: string } | null
+                    preOcgNames.set(id, grp?.name?.trim() ?? id)
+                  } catch { preOcgNames.set(id, id) }
+                }
+              }
+            }
+          }
+
+          // Find _-prefixed container markers and compute content-stream range
+          const preMarkers = Array.from(preOcgFirstOcc.entries())
+            .filter(([id]) => (preOcgNames.get(id) ?? '').trimStart().startsWith('_'))
+            .sort((a, b) => b[1] - a[1]) // descending
+          const containerEntry = preMarkers[artboard.pageNum - 1] ?? preMarkers[0]
+          const containerIdx = containerEntry ? containerEntry[1] : -1
+
+          // Build set of OCG names belonging to this artboard (all names in range)
+          const inRangeNames = new Set<string>()
+          if (containerIdx >= 0) {
+            const markersSortedAsc = [...preMarkers].reverse()
+            const ci = markersSortedAsc.findIndex(([id]) => id === containerEntry?.[0])
+            const nextEntry = ci >= 0 ? markersSortedAsc[ci + 1] : null
+            const nextContainerIdx = nextEntry ? nextEntry[1] : Infinity
+
+            for (const [id, pos] of Array.from(preOcgFirstOcc.entries())) {
+              if (pos > containerIdx && pos < nextContainerIdx) {
+                inRangeNames.add(preOcgNames.get(id) ?? id)
+              }
+            }
+            // Also include the container marker itself
+            if (containerEntry) inRangeNames.add(preOcgNames.get(containerEntry[0]) ?? containerEntry[0])
+            console.log('[AI Import] In-range OCG names for artboard', artboard.pageNum, ':', Array.from(inRangeNames))
+          }
+
+          // Create a new single-page PDF and build filtered /OCProperties
+          const newDoc = await PDFDocument.create()
+          const [copiedPage] = await newDoc.copyPages(origDoc, [artboard.pageNum - 1])
+          newDoc.addPage(copiedPage)
+
+          if (containerIdx >= 0 && inRangeNames.size > 0) {
+            // Find all /OCG objects in the new document and filter to in-range names
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const ocgRefs: any[] = []
+            for (const [ref, obj] of newDoc.context.enumerateIndirectObjects()) {
+              if (obj instanceof PDFDict) {
+                const typeEntry = obj.lookup(PDFName.of('Type'))
+                if (typeEntry?.toString() === '/OCG') {
+                  const nameEntry = obj.lookup(PDFName.of('Name'))
+                  // Name can be PDFString "(foo)" or PDFName "/foo"
+                  const rawName = nameEntry?.toString() ?? ''
+                  const ocgName = rawName.startsWith('(')
+                    ? rawName.slice(1, -1) // strip PDF string delimiters
+                    : rawName.replace(/^\//, '') // strip leading slash from PDF name
+                  if (inRangeNames.has(ocgName)) {
+                    ocgRefs.push(ref)
+                  }
+                }
+              }
+            }
+
+            if (ocgRefs.length > 0) {
+              // Build minimal /OCProperties with only in-range OCGs
+              const ocgArray = newDoc.context.obj(ocgRefs)
+              const defaultCfg = newDoc.context.obj({
+                Type: PDFName.of('OCConfig'),
+                BaseState: PDFName.of('ON'),
+              })
+              const ocProps = newDoc.context.obj({
+                OCGs: ocgArray,
+                D: defaultCfg,
+              })
+              newDoc.catalog.set(PDFName.of('OCProperties'), ocProps)
+              console.log('[AI Import] pdf-lib: filtered /OCProperties to', ocgRefs.length, 'OCGs for artboard', artboard.pageNum)
+            }
+          }
+
+          cleanPdfBytes = await newDoc.save()
+        } catch (e) {
+          console.warn('[AI Import] pdf-lib pre-processing failed, using original PDF:', e)
+        }
+      }
+
+      // Load the clean per-artboard PDF (or fall back to original)
+      let pdf = pdfDocRef.current
+      let effectivePageNum = artboard.pageNum
+      if (cleanPdfBytes) {
+        try {
+          pdf = await pdfjs.getDocument({ data: cleanPdfBytes }).promise
+          effectivePageNum = 1 // clean PDF has only one page
+        } catch (e) {
+          console.warn('[AI Import] Failed to load clean PDF, using original:', e)
+          pdf = pdfDocRef.current
+          effectivePageNum = artboard.pageNum
+        }
+      }
+
+      const page = await pdf.getPage(effectivePageNum)
       const vp1 = page.getViewport({ scale: 1 })
 
       // ── Collect all OCGs via operator list (pdfjs v5 #groups is private) ─────

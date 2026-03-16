@@ -19,7 +19,7 @@ function ArtboardVariantSwitcher({
   onSwitch: (i: number) => void
 }) {
   return (
-    <div className="flex items-center justify-center gap-3 px-4 py-3 border-t border-white/10 bg-black/30 flex-wrap">
+    <div className="flex items-center justify-center gap-3 px-6 py-4 pb-28 border-t border-white/10 bg-black/30 flex-wrap">
       {variants.map((v, i) => (
         <button
           key={i}
@@ -84,7 +84,7 @@ export default function CreatorPage() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-[#0a0118] relative overflow-hidden">
+    <div className="min-h-screen bg-[#0a0118] relative overflow-y-auto">
       {/* Background effects */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-[100px]" />
@@ -178,21 +178,23 @@ export default function CreatorPage() {
           <CreatorSidebar config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} />
           <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
             <PreviewCanvas config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} onSelectField={setSelectedFieldIndex} />
-            {config.aiImportVariants && config.aiImportVariants.variants.length > 1 && (
-              <ArtboardVariantSwitcher
-                variants={config.aiImportVariants.variants}
-                activeIndex={config.aiImportVariants.activeVariantIndex}
-                onSwitch={(i) => {
-                  const vars = config.aiImportVariants!
-                  updateConfig({
-                    aiImport: vars.variants[i],
-                    aiImportVariants: { ...vars, activeVariantIndex: i },
-                  })
-                }}
-              />
-            )}
           </div>
         </div>
+
+        {/* Artboard variant switcher — scrollable below main canvas area */}
+        {config.aiImportVariants && config.aiImportVariants.variants.length > 1 && (
+          <ArtboardVariantSwitcher
+            variants={config.aiImportVariants.variants}
+            activeIndex={config.aiImportVariants.activeVariantIndex}
+            onSwitch={(i) => {
+              const vars = config.aiImportVariants!
+              updateConfig({
+                aiImport: vars.variants[i],
+                aiImportVariants: { ...vars, activeVariantIndex: i },
+              })
+            }}
+          />
+        )}
 
         {/* Export Bar */}
         <ExportBar config={config} />
