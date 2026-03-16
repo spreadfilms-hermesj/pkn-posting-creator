@@ -89,12 +89,15 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           } catch { /* VP not accessible */ }
         }
 
-        // Scan operator list for the first non-starred OCG — in Illustrator files,
-        // the outermost OCG on each page is the artboard container layer (e.g. _01_Posting_16:9)
-        // which carries the artboard name. Strip leading underscores Illustrator adds.
+        // Scan operator list for _-prefixed marker OCGs (Illustrator artboard container layers
+        // like _01_Posting_16:9). Sort by content-stream position DESCENDING — in PDF, lower
+        // Illustrator layers render first so the last marker found = topmost artboard.
+        // Pick index [pageNum-1] to map each PDF page to its artboard marker in panel order.
         if (!name && ocgCfgForNames) {
           try {
             const ops = await page.getOperatorList()
+            const markers: Array<{name: string; idx: number}> = []
+            const seenMarkers = new Set<string>()
             for (let j = 0; j < ops.fnArray.length; j++) {
               if (ops.fnArray[j] === pdfjs.OPS.beginMarkedContentProps) {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -103,13 +106,17 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
                   const grp = ocgCfgForNames.getGroup(String(args[1].id)) as { name?: string } | null
                   const n = grp?.name?.trim()
-                  if (n && !n.startsWith('*') && !n.startsWith('!')) {
-                    name = n.replace(/^_+/, '').trim()
-                    break
+                  if (n && n.startsWith('_') && !seenMarkers.has(n)) {
+                    markers.push({ name: n, idx: j })
+                    seenMarkers.add(n)
                   }
                 }
               }
             }
+            // Descending: last in stream = topmost in Illustrator panel = artboard 1 (page 1)
+            markers.sort((a, b) => b.idx - a.idx)
+            const marker = markers[i - 1] ?? markers[0]
+            if (marker) name = marker.name.replace(/^_+/, '').trim()
           } catch { /* operator list scan failed */ }
         }
 
@@ -156,31 +163,41 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const firstOpList = await page.getOperatorList()
 
       // Build OCG parent-child map from the PDF's /OCProperties/D/Order array.
-      // Illustrator exports ALL layers (including sublayers) as FLAT sequential OCGs in the
-      // content stream — they are NOT nested in BDC/EMC blocks. The true hierarchy is only
-      // encoded in the /Order array. Format: ["id1", "id2", ["child_a", "child_b"], "id3"]
-      // where an array immediately following an id represents that id's children.
+      // pdfjs v5 parseNestedOrder converts the raw /Order array into either:
+      //   - plain strings (top-level OCG IDs)
+      //   - {name: ocgId, order: [...childIds]} objects (grouped/nested OCGs)
+      // We handle both formats to correctly capture Illustrator's artboard container hierarchy.
       const ocgParentMap = new Map<string, string | null>()
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const orderArr = (ocgConfig as any).getOrder?.()
         if (Array.isArray(orderArr)) {
-          const parseOrder = (arr: unknown[], parentId: string | null) => {
-            let prev: string | null = null
-            for (const item of arr) {
-              if (typeof item === 'string') {
-                ocgParentMap.set(item, parentId)
-                prev = item
-              } else if (Array.isArray(item) && prev !== null) {
-                parseOrder(item as unknown[], prev)
-                prev = null
+          const parseOrderItem = (item: unknown, parentId: string | null) => {
+            if (typeof item === 'string') {
+              if (!ocgParentMap.has(item)) ocgParentMap.set(item, parentId)
+            } else if (item && typeof item === 'object' && !Array.isArray(item)) {
+              // pdfjs {name: ocgId, order: [...children]} format
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const group = item as { name?: string; order?: unknown[] }
+              const groupId = group.name ?? null
+              if (groupId) {
+                if (!ocgParentMap.has(groupId)) ocgParentMap.set(groupId, parentId)
+                if (Array.isArray(group.order)) {
+                  for (const child of group.order) parseOrderItem(child, groupId)
+                }
               }
+            } else if (Array.isArray(item)) {
+              for (const child of item) parseOrderItem(child, parentId)
             }
           }
-          parseOrder(orderArr, null)
+          for (const item of orderArr) parseOrderItem(item, null)
           console.log('[AI Import] OCG order map:', Array.from(ocgParentMap.entries()).map(([k, v]) => `${k} → ${v ?? 'top'}`))
         }
       } catch { /* getOrder not available; content-stream stack used as fallback */ }
+
+      // Tracks the first operator-list index at which each OCG's BDC marker appears.
+      // Used to sort marker OCGs in content-stream order (descending = Illustrator top-to-bottom).
+      const ocgFirstOccurrence = new Map<string, number>()
 
       // id: OCG ref like "25R", or synthetic "layer:*Grafik" for non-OCG BDC sublayers
       // isOCG: true = registered OCG (setVisibility works), false = BDC marker only
@@ -208,8 +225,9 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
               ocgStack.push(ocgId)
               if (!seenOCGIds.has(ocgId)) {
                 seenOCGIds.add(ocgId)
-                // Use /Order hierarchy (ocgParentMap) as the authoritative source for parentId.
-                // Illustrator writes OCGs flat in the content stream, so the stack is unreliable.
+                ocgFirstOccurrence.set(ocgId, j)
+                // Use /Order hierarchy (ocgParentMap) first, then content-stream stack as fallback.
+                // For nested layers (sublayers of a container), the stack correctly captures the parent.
                 const parentId = ocgParentMap.has(ocgId) ? ocgParentMap.get(ocgId)! : stackParentId
                 try {
                   const group = ocgConfig.getGroup(ocgId) as { name?: string } | null
@@ -260,21 +278,43 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           cfgStep = cfgIter.next()
           if (!scannedOCGIds.has(ocgId)) {
             const name = (ocgGroup as any)?.name ?? ocgId
-            allOCGs.push({ id: ocgId, name, isOCG: true, parentId: null })
+            // Carry parentId from /Order map so container-based filtering works for graphic layers
+            const parentId = ocgParentMap.get(ocgId) ?? null
+            allOCGs.push({ id: ocgId, name, isOCG: true, parentId })
             supplementedOCGIds.add(ocgId)
             console.log(`[AI Import] Supplemented OCG from config: "${name}" (${ocgId})`)
           }
         }
       } catch { /* iterator not available in this pdfjs build */ }
 
-      // Include ALL *-prefixed and !-prefixed layers as editable fields.
-      const containerIds = new Set<string>() // no _ container recognition
+      // Find _-prefixed marker OCGs (Illustrator artboard container layers like _01_Posting_16:9).
+      // Sort DESCENDING by content-stream occurrence: last-in-stream = topmost-in-panel = artboard 1.
+      // artboard.pageNum is 1-indexed, so markerOCGs[pageNum-1] is the container for this artboard.
+      const markerOCGs = allOCGs
+        .filter(g => g.isOCG && g.name.trimStart().startsWith('_'))
+        .sort((a, b) => (ocgFirstOccurrence.get(b.id) ?? 0) - (ocgFirstOccurrence.get(a.id) ?? 0))
+      const containerOCG = markerOCGs.length > 0
+        ? (markerOCGs[artboard.pageNum - 1] ?? markerOCGs[markerOCGs.length - 1])
+        : null
+      const containerOCGId = containerOCG?.id ?? null
+
+      // If a container marker was found, keep it visible so its non-starred sublayers
+      // (Background, Element, etc.) remain rendered in the background image.
+      const containerIds = new Set<string>()
+      if (containerOCGId) containerIds.add(containerOCGId)
+
+      // Effective OCGs: *-prefixed and !-prefixed layers belonging to this artboard.
+      // When a container marker exists, restrict to its direct children only —
+      // this prevents OCGs from other artboards bleeding into this artboard's field list.
       const effectiveOCGs = allOCGs.filter(g => {
         const name = g.name.trimStart()
-        return name.startsWith('*') || name.startsWith('!')
+        if (!name.startsWith('*') && !name.startsWith('!')) return false
+        if (containerOCGId !== null) return g.parentId === containerOCGId
+        return true // no container markers → include all */* layers (flat structure)
       })
 
-      console.log('[AI Import] All OCGs:', allOCGs.map(g => `${g.id} (${g.isOCG ? 'OCG' : 'layer'}): "${g.name}"`))
+      console.log('[AI Import] Container marker:', containerOCG ? `"${containerOCG.name}" (${containerOCGId})` : 'none (flat structure)')
+      console.log('[AI Import] All OCGs:', allOCGs.map(g => `${g.id} (${g.isOCG ? 'OCG' : 'layer'}): "${g.name}" parent=${g.parentId ?? 'top'}`))
       console.log('[AI Import] Effective OCGs:', effectiveOCGs.map(g => `${g.id}: "${g.name}"`))
 
       // ── Extract text content, grouped by OCG via marked content markers ────
@@ -635,18 +675,6 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       console.log('[AI Import] OCG has-image:', Array.from(ocgHasImage.entries()).map(([id, v]) => `${effectiveOCGs.find(g=>g.id===id)?.name ?? id}: ${v}`))
       console.log('[AI Import] OCG parent ids:', Array.from(ocgParentId.entries()))
       console.log('[AI Import] OCG path bboxes:', Array.from(ocgPathBBox.entries()))
-
-      // Remove supplemented OCGs that have no operator-list presence on this page.
-      // These were added from the document-level OCG config and belong to OTHER artboards.
-      // Any OCG with actual content on this page will have been found by the operator scan
-      // (via BDC beginMarkedContentProps) and will have an entry in ocgFirstIdx.
-      for (let ei = effectiveOCGs.length - 1; ei >= 0; ei--) {
-        const ocg = effectiveOCGs[ei]
-        if (supplementedOCGIds.has(ocg.id) && !ocgFirstIdx.has(ocg.id)) {
-          console.log(`[AI Import] Removing cross-artboard OCG: "${ocg.name}" (${ocg.id}) — not present on this page`)
-          effectiveOCGs.splice(ei, 1)
-        }
-      }
 
       // Separate and order OCGs
       // Sort in DESCENDING ocgFirstIdx order: PDF draws bottom-to-top, so descending = Illustrator top-to-bottom layer order
@@ -1133,7 +1161,9 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         backgroundImageUrl: bgCanvas.toDataURL('image/png'),
         artboardWidth: artboard.width,
         artboardHeight: artboard.height,
-        artboardName: artboard.name,
+        artboardName: containerOCG
+          ? containerOCG.name.replace(/^_+/, '').trim()
+          : artboard.name,
         editableFields: extractedFields,
       }
     } catch (err) {
