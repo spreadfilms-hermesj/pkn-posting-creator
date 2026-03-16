@@ -19,29 +19,28 @@ function ArtboardVariantSwitcher({
   onSwitch: (i: number) => void
 }) {
   return (
-    <div className="flex items-center justify-center gap-3 px-6 py-4 pb-28 border-t border-white/10 bg-black/30 flex-wrap">
+    <div className="flex flex-col gap-2 px-2 py-3 overflow-y-auto border-l border-white/10 bg-black/20 w-[84px] shrink-0">
       {variants.map((v, i) => (
         <button
           key={i}
           onClick={() => onSwitch(i)}
-          className={`flex flex-col items-center gap-1.5 px-3 py-2 rounded-xl border transition-all ${
+          className={`flex flex-col items-center gap-1 p-1.5 rounded-xl border transition-all ${
             i === activeIndex
               ? 'border-cyan-400 bg-cyan-500/20 text-cyan-300'
               : 'border-white/10 bg-white/5 text-gray-400 hover:border-white/30 hover:text-white'
           }`}
         >
           <div
-            className="rounded overflow-hidden bg-black/30 flex-shrink-0"
+            className="rounded overflow-hidden bg-black/30 flex-shrink-0 w-full"
             style={{
-              width: 44,
-              height: Math.min(50, Math.round(44 * v.artboardHeight / Math.max(v.artboardWidth, 1))),
+              height: Math.min(48, Math.round(60 * v.artboardHeight / Math.max(v.artboardWidth, 1))),
             }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={v.backgroundImageUrl} alt={v.artboardName} className="w-full h-full object-cover" />
           </div>
-          <span className="text-[11px] font-medium leading-tight text-center max-w-[80px] truncate">{v.artboardName}</span>
-          <span className="text-[10px] text-gray-500">{v.artboardWidth}×{v.artboardHeight}</span>
+          <span className="text-[10px] font-medium leading-tight text-center w-full truncate">{v.artboardName}</span>
+          <span className="text-[9px] text-gray-500">{v.artboardWidth}×{v.artboardHeight}</span>
         </button>
       ))}
     </div>
@@ -84,7 +83,7 @@ export default function CreatorPage() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-[#0a0118] relative overflow-y-auto">
+    <div className="h-screen bg-[#0a0118] relative overflow-hidden">
       {/* Background effects */}
       <div className="fixed inset-0 pointer-events-none">
         <div className="absolute top-0 left-1/4 w-96 h-96 bg-cyan-500/10 rounded-full blur-[100px]" />
@@ -176,25 +175,23 @@ export default function CreatorPage() {
         {/* Main Layout */}
         <div className="flex h-[calc(100vh-57px)]">
           <CreatorSidebar config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} />
-          <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+          <div className="flex flex-1 min-w-0 overflow-hidden">
             <PreviewCanvas config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} onSelectField={setSelectedFieldIndex} />
+            {config.aiImportVariants && config.aiImportVariants.variants.length > 1 && (
+              <ArtboardVariantSwitcher
+                variants={config.aiImportVariants.variants}
+                activeIndex={config.aiImportVariants.activeVariantIndex}
+                onSwitch={(i) => {
+                  const vars = config.aiImportVariants!
+                  updateConfig({
+                    aiImport: vars.variants[i],
+                    aiImportVariants: { ...vars, activeVariantIndex: i },
+                  })
+                }}
+              />
+            )}
           </div>
         </div>
-
-        {/* Artboard variant switcher — scrollable below main canvas area */}
-        {config.aiImportVariants && config.aiImportVariants.variants.length > 1 && (
-          <ArtboardVariantSwitcher
-            variants={config.aiImportVariants.variants}
-            activeIndex={config.aiImportVariants.activeVariantIndex}
-            onSwitch={(i) => {
-              const vars = config.aiImportVariants!
-              updateConfig({
-                aiImport: vars.variants[i],
-                aiImportVariants: { ...vars, activeVariantIndex: i },
-              })
-            }}
-          />
-        )}
 
         {/* Export Bar */}
         <ExportBar config={config} />
