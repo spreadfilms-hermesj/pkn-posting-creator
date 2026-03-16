@@ -217,21 +217,14 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
       } catch { /* iterator not available in this pdfjs build */ }
 
-      // Layers named with a leading '_' (e.g. "_16:9") are transparent artboard containers —
-      // they are excluded from editable fields and hidden in the background render.
-      const containerIds = new Set(
-        allOCGs.filter(g => g.name.trimStart().startsWith('_')).map(g => g.id)
-      )
-
-      // Include ALL *-prefixed and !-prefixed layers regardless of nesting depth.
-      // This handles the case where editable layers are sublayers of a _-container in Illustrator.
+      // Include ALL *-prefixed and !-prefixed layers as editable fields.
+      const containerIds = new Set<string>() // no _ container recognition
       const effectiveOCGs = allOCGs.filter(g => {
         const name = g.name.trimStart()
         return name.startsWith('*') || name.startsWith('!')
       })
 
-      console.log('[AI Import] All OCGs:', allOCGs.map(g => `${g.id} (${g.isOCG ? 'OCG' : 'layer'}): "${g.name}" parent=${g.parentId ?? 'top'}`))
-      console.log('[AI Import] Containers:', Array.from(containerIds))
+      console.log('[AI Import] All OCGs:', allOCGs.map(g => `${g.id} (${g.isOCG ? 'OCG' : 'layer'}): "${g.name}"`))
       console.log('[AI Import] Effective OCGs:', effectiveOCGs.map(g => `${g.id}: "${g.name}"`))
 
       // ── Extract text content, grouped by OCG via marked content markers ────
@@ -614,7 +607,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           const bottomVy = Math.max(...block.map(it => it.vy))
           const minVx = Math.min(...block.map(it => it.vx))
           const maxVx = Math.min(Math.max(...block.map(it => {
-            const w = it.width > 2 ? it.width : it.str.length * it.fontSize * 0.55
+            const w = it.width > 2 ? it.width * 1.15 : it.str.length * it.fontSize * 0.65
             return it.vx + w
           })), vp1.width * 0.95)
           const fs = block[0].fontSize
@@ -629,7 +622,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           extractedFields.push({
             type: 'text', layerName: label, value: text, originalText: text,
             x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
-            width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
+            width: Math.min(0.98, Math.max(0.5, (maxVx - minVx) / vp1.width)),
             height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
             scale: 1, opacity: 1, fontSize: fs, color: '#ffffff',
             fontWeight: getFontWeight(block[0].fontName), fontStyle: 'normal', textAlign: 'left',
@@ -658,7 +651,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           const bottomVy = Math.max(...block.map(it => it.vy))
           const minVx = Math.min(...block.map(it => it.vx))
           const maxVx = Math.min(Math.max(...block.map(it => {
-            const w = it.width > 2 ? it.width : it.str.length * it.fontSize * 0.55
+            const w = it.width > 2 ? it.width * 1.15 : it.str.length * it.fontSize * 0.65
             return it.vx + w
           })), vp1.width * 0.95)
           const fs = block[0].fontSize
@@ -675,7 +668,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           extractedFields.push({
             type: 'text', layerName, value: text, originalText: text,
             x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
-            width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
+            width: Math.min(0.98, Math.max(0.5, (maxVx - minVx) / vp1.width)),
             height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
             scale: 1, opacity: 1, fontSize: fs, color: '#ffffff',
             fontWeight: getFontWeight(block[0].fontName), fontStyle: 'normal', textAlign: 'left',
