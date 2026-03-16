@@ -151,7 +151,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
       }
 
-      const starredOCGs = allOCGs.filter(g => g.name.trimStart().startsWith('*'))
+      const starredOCGs = allOCGs.filter(g => g.name.trimStart().startsWith('*') || g.name.trimStart().startsWith('!'))
       // If no starred OCGs (sublayers not individually exported), fall back to all
       const effectiveOCGs = starredOCGs.length > 0 ? starredOCGs : allOCGs
 
@@ -266,7 +266,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       }).promise
 
       // "Page background only" canvas: ALL registered OCGs hidden (starred + non-starred).
-      // Used later to distinguish bare page-background pixels (→ transparent, let *Image
+      // Used later to distinguish bare page-background pixels (→ transparent, let !-image slots
       // show through) from design-element pixels (Element, Background overlays → keep opaque).
       const pageBgCfg = await pdf.getOptionalContentConfig()
       for (const { id, isOCG } of allOCGs) {
@@ -487,7 +487,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         // ── Process text OCGs (correctly ordered by operator list position) ──
         for (let ti = 0; ti < textStarredOCGs.length; ti++) {
           const { name: ocgRawName, id: ocgId, isOCG: textIsOCG } = textStarredOCGs[ti]
-          const layerName = ocgRawName.replace(/^\s*\*/, '').trim()
+          const layerName = ocgRawName.replace(/^\s*[*!]/, '').trim()
 
           // Try OCG-specific text items first, then fall back to positional block
           let block: RichItem[] | null = null
@@ -577,7 +577,8 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
         // ── Process graphic OCGs ──────────────────────────────────────────
         for (const { id: ocgId, name: ocgRawName, isOCG: ocgIsRegistered } of graphicStarredOCGs) {
-          const layerName = ocgRawName.replace(/^\s*\*/, '').trim()
+          const layerName = ocgRawName.replace(/^\s*[*!]/, '').trim()
+          const isImageSlot = ocgRawName.trimStart().startsWith('!')
           console.log(`[AI Import] Extracting graphic: "${layerName}" (${ocgId})`)
 
           let imageUrl: string | undefined
@@ -855,7 +856,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           }
 
           extractedFields.push({
-            type: 'graphic', layerName, value: '', originalText: '',
+            type: 'graphic', layerName, isImageSlot, value: '', originalText: '',
             imageUrl, scale: 1, opacity: 1,
             x: gx, y: gy, width: gw, height: gh,
             fontSize: 0, color: '#ffffff', fontWeight: 'normal', fontStyle: 'normal', textAlign: 'left',
@@ -863,22 +864,20 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
       }
 
-      // Make bgCanvas transparent in *Image regions — but ONLY for bare page-background
+      // Make bgCanvas transparent in !-image slot regions — but ONLY for bare page-background
       // pixels (those matching pageBgCanvas). Pixels from design layers that sit above
-      // *Image in the layer stack (e.g. "Element", "Background" overlays) are KEPT opaque
+      // the image slot in the layer stack (e.g. "Element", "Background" overlays) are KEPT opaque
       // so they render correctly on top of the photo.
       //
-      // Algorithm per pixel inside each *Image field's bbox:
+      // Algorithm per pixel inside each image slot field's bbox:
       //   |bgCanvas – pageBgCanvas| ≤ 12 → page background only → alpha = 0 (transparent)
       //   |bgCanvas – pageBgCanvas| >  12 → design element       → keep (alpha unchanged)
-      const hasImageField = extractedFields.some(
-        f => f.type === 'graphic' && /^image$/i.test(f.layerName)
-      )
+      const hasImageField = extractedFields.some(f => f.isImageSlot === true)
       if (hasImageField) {
         const bgImgData = bgCtx.getImageData(0, 0, artW_px, artH_px)
         const bgPixels = bgImgData.data
         for (const field of extractedFields) {
-          if (field.type === 'graphic' && /^image$/i.test(field.layerName)) {
+          if (field.isImageSlot === true) {
             const x0 = Math.max(0, Math.floor(field.x * artW_px))
             const y0 = Math.max(0, Math.floor(field.y * artH_px))
             const x1 = Math.min(artW_px, Math.ceil((field.x + field.width) * artW_px))
@@ -1104,8 +1103,8 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                       {fields.map((field, i) => (
                         <div key={i}>
                           <Label className="text-gray-300 flex items-center gap-2 mb-2">
-                            <span className="text-cyan-400 text-xs bg-cyan-500/20 px-2 py-0.5 rounded font-mono">*{field.layerName}</span>
-                            <span className="text-xs text-gray-500">{field.type === 'graphic' ? 'Grafik-Layer' : 'Text-Layer'}</span>
+                            <span className="text-cyan-400 text-xs bg-cyan-500/20 px-2 py-0.5 rounded font-mono">{field.isImageSlot ? '!' : '*'}{field.layerName}</span>
+                            <span className="text-xs text-gray-500">{field.isImageSlot ? 'Bild-Layer' : field.type === 'graphic' ? 'Grafik-Layer' : 'Text-Layer'}</span>
                             {field.type === 'text' && field.value !== field.originalText && (
                               <button
                                 onClick={() => resetFieldValue(i)}

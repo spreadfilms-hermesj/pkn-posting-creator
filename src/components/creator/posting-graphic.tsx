@@ -67,10 +67,10 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
             const top = field.y * artboardHeight
             const w = field.width * artboardWidth
             const h = field.height * artboardHeight
-            // Image-type layers (named *Image) sit BELOW all other editable fields (z=1),
+            // Image-slot layers (!-prefixed) sit BELOW all other editable fields (z=1),
             // above the background canvas which has a transparent hole punched at this region.
             // Background canvas is z=2. Other editable fields (text, *Grafik) are z=3.
-            const isImageLayer = field.type === 'graphic' && /^image$/i.test(field.layerName)
+            const isImageLayer = field.isImageSlot === true
             const sharedStyle: React.CSSProperties = {
               position: 'absolute',
               left,

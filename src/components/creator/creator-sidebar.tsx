@@ -143,8 +143,9 @@ function AIFieldItem({
           <ChevronDown
             className={`w-3 h-3 shrink-0 transition-transform ${open ? '' : '-rotate-90'} ${isSelected ? 'text-cyan-400' : 'text-gray-500'}`}
           />
-          <span className={`font-mono text-xs font-semibold tracking-wide ${(field.opacity ?? 1) === 0 ? 'opacity-30' : ''} ${isSelected ? 'text-cyan-300' : 'text-cyan-400'}`}>*{field.layerName}</span>
-          {field.type === 'graphic' && <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">Grafik</span>}
+          <span className={`font-mono text-xs font-semibold tracking-wide ${(field.opacity ?? 1) === 0 ? 'opacity-30' : ''} ${isSelected ? 'text-cyan-300' : 'text-cyan-400'}`}>{field.isImageSlot ? '!' : '*'}{field.layerName}</span>
+          {field.isImageSlot && <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">Bild</span>}
+          {field.type === 'graphic' && !field.isImageSlot && <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">Grafik</span>}
           {isSelected && <span className="ml-auto text-[10px] text-cyan-500 font-normal">aktiv</span>}
         </button>
         <button
@@ -171,7 +172,7 @@ function AIFieldItem({
           )}
           {field.type === 'graphic' && (
             <>
-              {/^image$/i.test(field.layerName) && (
+              {field.isImageSlot === true && (
                 <>
                   <input
                     ref={imageInputRef}

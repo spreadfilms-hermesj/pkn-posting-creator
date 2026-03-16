@@ -1,6 +1,7 @@
 export interface AIEditableField {
   type: 'text' | 'graphic'
-  layerName: string      // e.g. "Headline" (the * is stripped)
+  layerName: string      // e.g. "Headline" (the * or ! is stripped)
+  isImageSlot?: boolean  // true for !-prefixed layers (editable image placeholder)
   // text fields
   value: string
   originalText: string
