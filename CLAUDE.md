@@ -45,16 +45,38 @@ Everything visible on the canvas is derived from a single `PostingConfig` object
 Uses `pdfjs-dist` (v5, loaded dynamically on the client) to parse `.ai` files as PDFs:
 1. Lists PDF pages as artboards with thumbnails
 2. Reads Optional Content Groups (OCGs) — each Illustrator layer becomes one
-3. Layers whose name starts with `*` are "editable"; their OCG visibility is set to `false` before rendering the background
-4. Text content is extracted per-OCG via `getTextContent({ includeMarkedContent: true })` — marked content items with `type === 'beginMarkedContentProps'` carry the OCG `id`
-5. Text extraction — **positional block grouping is always the primary method** (OCG ID matching is unreliable in pdfjs v5):
-   - **OCG-ID matching** (stack-based, handles nested layers): walks `getTextContent({ includeMarkedContent: true })` items using a push/pop stack for `beginMarkedContent`/`endMarkedContent` events, assigns text to the innermost starred OCG on the stack
-   - **Positional block grouping** (fallback per layer): clusters all text items by Y-gap relative to font size, assigns the N-th block to the N-th starred layer in top-to-bottom order — reliable even when OCG IDs don't match
-6. Field positions are derived from text item `transform` matrices converted via `viewport.convertToViewportPoint()`
+3. Layers prefixed with `*` are editable text/graphic fields; `!`-prefixed layers are editable image slots (upload placeholders)
+4. OCG visibility is set to `false` for all editable layers before rendering the background image
+5. Text extraction uses OCG-ID matching (stack-based) with positional block grouping as fallback
+6. Graphic layers are extracted via pixel-diff rendering (full vs. without that OCG)
+7. Field positions are derived from text item `transform` matrices via `viewport.convertToViewportPoint()`
+
+**Critical OCG detection rules:**
+- ALL `*`-prefixed and `!`-prefixed OCGs are included as `effectiveOCGs` — **no content-stream range filtering**. Range filters break because Illustrator writes `_`-container markers AFTER their sublayers in draw order (bottom-to-top), so all editable layers would be excluded.
+- Supplemented OCGs (found via `ocgConfig[Symbol.iterator]()`, not in content stream BDC markers) are always included — pdfjs rendering naturally isolates per-page content.
+- Graphic/image fields with no extracted `imageUrl` are **skipped at import** and **hidden in the sidebar** — never shown as error placeholders.
+- `!`-prefixed image slots are also skipped if extraction fails (no imageUrl).
+
+**Layer naming conventions (Illustrator):**
+- `*LayerName` — editable text or graphic field
+- `!LayerName` — editable image upload slot
+- `_ArtboardName` — artboard container marker (e.g. `_01_Posting_16:9`)
 
 The pdfjs worker is loaded from unpkg CDN: `https://unpkg.com/pdfjs-dist@{version}/build/pdf.worker.min.mjs`
 
 **Requirement for users:** `.ai` files must be saved with *Create PDF Compatible File* checked (Illustrator default).
+
+### Multi-artboard import
+When multiple artboards are selected, each becomes an `AIImportData` variant stored in `config.aiImportVariants`. The `ArtboardVariantSwitcher` component in `creator/page.tsx` renders as an **absolute overlay at the bottom of the canvas area** (not a separate bar), allowing the user to switch between artboard formats. The left sidebar is unaffected.
+
+### Layout (`src/app/creator/page.tsx`)
+```
+[Header]
+[Left: CreatorSidebar (full height)] | [Right: relative container]
+                                          [PreviewCanvas (flex-1, scrollable)]
+                                          [ArtboardVariantSwitcher (absolute bottom overlay, z-20)]
+[ExportBar (fixed bottom)]
+```
 
 ### Export
 `ExportBar` uses `html2canvas` (dynamically imported). It briefly un-hides each fixed export container, pre-measures gradient element widths (because `getBoundingClientRect` returns 0 on hidden elements), then passes those widths into `html2canvas`'s `onclone` callback to fix gradient rendering. All formats can be exported at once as a ZIP via `jszip`.
