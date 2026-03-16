@@ -309,7 +309,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const effectiveOCGs = allOCGs.filter(g => {
         const name = g.name.trimStart()
         if (!name.startsWith('*') && !name.startsWith('!')) return false
-        if (containerOCGId !== null) return g.parentId === containerOCGId
+        if (containerOCGId !== null) return g.parentId === containerOCGId || g.parentId === null
         return true // no container markers → include all */* layers (flat structure)
       })
 
@@ -668,6 +668,20 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         console.warn('[AI Import] Operator list analysis failed:', e)
       }
 
+      // Remove supplemented null-parent OCGs that have no operator-list presence on this page.
+      // The supplement adds ALL document-level OCGs (shared across artboards), but only this
+      // artboard's OCGs will have BDC markers in this page's content stream → ocgFirstIdx set.
+      // OCGs with no ocgFirstIdx entry belong to other artboards and must be pruned.
+      if (containerOCGId !== null) {
+        for (let ei = effectiveOCGs.length - 1; ei >= 0; ei--) {
+          const ocg = effectiveOCGs[ei]
+          if (supplementedOCGIds.has(ocg.id) && ocg.parentId === null && !ocgFirstIdx.has(ocg.id)) {
+            console.log(`[AI Import] Removing absent supplemented OCG: "${ocg.name}"`)
+            effectiveOCGs.splice(ei, 1)
+          }
+        }
+      }
+
       console.log('[AI Import] OCG text classification:', Array.from(ocgIsText.entries()).map(([id, t]) => {
         const name = effectiveOCGs.find(g => g.id === id)?.name ?? id
         return `${name}: ${t ? 'TEXT' : 'GRAPHIC'}`
@@ -816,6 +830,11 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         for (const { id: ocgId, name: ocgRawName, isOCG: ocgIsRegistered } of graphicStarredOCGs) {
           const layerName = ocgRawName.replace(/^\s*[*!]/, '').trim()
           const isImageSlot = ocgRawName.trimStart().startsWith('!')
+          // Skip graphic OCGs with no evidence of content on this page (phantom cross-artboard leaks)
+          if (!ocgFirstIdx.has(ocgId) && !ocgPathBBox.has(ocgId)) {
+            console.log(`[AI Import] Skipping empty graphic OCG: "${layerName}"`)
+            continue
+          }
           console.log(`[AI Import] Extracting graphic: "${layerName}" (${ocgId})`)
 
           let imageUrl: string | undefined
