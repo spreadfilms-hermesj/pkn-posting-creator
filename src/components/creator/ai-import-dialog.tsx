@@ -33,7 +33,6 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pdfDocRef = useRef<any>(null)
-  const fileBytesRef = useRef<Uint8Array | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ── Step 1: parse the file and list artboards ─────────────────────────────
@@ -49,7 +48,6 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
       const arrayBuffer = await file.arrayBuffer()
       const fileBytes = new Uint8Array(arrayBuffer)
-      fileBytesRef.current = fileBytes
       const pdf = await pdfjs.getDocument({ data: fileBytes }).promise
       pdfDocRef.current = pdf
 
@@ -156,147 +154,8 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
     try {
       const pdfjs = await import('pdfjs-dist')
 
-      // ── Phase 0: create a clean per-artboard PDF using pdf-lib ───────────────
-      // When a multi-artboard file is imported, all artboard OCGs are document-level
-      // and appear in every page's content stream. This causes cross-artboard bleed
-      // (other artboards' layers being detected as editable fields).
-      //
-      // Fix: pre-scan the original PDF to find which OCG names belong to this artboard
-      // (using the _-marker range heuristic), then use pdf-lib to create a new
-      // single-page PDF whose /OCProperties only contains this artboard's OCGs.
-      // pdfjs processes the clean PDF — supplement and getGroup only see relevant OCGs.
-      let cleanPdfBytes: Uint8Array | null = null
-      if (fileBytesRef.current) {
-        try {
-          const { PDFDocument, PDFName, PDFDict } = await import('pdf-lib')
-          const origDoc = await PDFDocument.load(fileBytesRef.current)
-
-          // Pre-scan the ORIGINAL page's operator list to find the in-range OCG names
-          // for this artboard, using the _-marker boundary convention.
-          const origPdf = pdfDocRef.current
-          const origPage = await origPdf.getPage(artboard.pageNum)
-          const origOcgConfig = await origPdf.getOptionalContentConfig()
-          const origOpList = await origPage.getOperatorList()
-
-          // Collect OCG first-occurrence positions in the content stream
-          const preOcgFirstOcc = new Map<string, number>()
-          const preOcgNames = new Map<string, string>() // id → name
-          const preSeen = new Set<string>()
-          for (let j = 0; j < origOpList.fnArray.length; j++) {
-            if (origOpList.fnArray[j] === pdfjs.OPS.beginMarkedContentProps) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const args = origOpList.argsArray[j] as any[]
-              if (String(args[0] ?? '') === 'OC' && args[1]?.id) {
-                const id = String(args[1].id)
-                if (!preSeen.has(id)) {
-                  preSeen.add(id)
-                  preOcgFirstOcc.set(id, j)
-                  try {
-                    const grp = origOcgConfig.getGroup(id) as { name?: string } | null
-                    preOcgNames.set(id, grp?.name?.trim() ?? id)
-                  } catch { preOcgNames.set(id, id) }
-                }
-              }
-            }
-          }
-
-          // Find _-prefixed container markers and compute content-stream range
-          const preMarkers = Array.from(preOcgFirstOcc.entries())
-            .filter(([id]) => (preOcgNames.get(id) ?? '').trimStart().startsWith('_'))
-            .sort((a, b) => b[1] - a[1]) // descending
-          const containerEntry = preMarkers[artboard.pageNum - 1] ?? preMarkers[0]
-          const containerIdx = containerEntry ? containerEntry[1] : -1
-
-          // Build set of OCG names belonging to this artboard (all names in range)
-          const inRangeNames = new Set<string>()
-          if (containerIdx >= 0) {
-            const markersSortedAsc = [...preMarkers].reverse()
-            const ci = markersSortedAsc.findIndex(([id]) => id === containerEntry?.[0])
-            const nextEntry = ci >= 0 ? markersSortedAsc[ci + 1] : null
-            const nextContainerIdx = nextEntry ? nextEntry[1] : Infinity
-
-            for (const [id, pos] of Array.from(preOcgFirstOcc.entries())) {
-              if (pos > containerIdx && pos < nextContainerIdx) {
-                inRangeNames.add(preOcgNames.get(id) ?? id)
-              }
-            }
-            // Also include the container marker itself
-            if (containerEntry) inRangeNames.add(preOcgNames.get(containerEntry[0]) ?? containerEntry[0])
-            console.log('[AI Import] In-range OCG names for artboard', artboard.pageNum, ':', Array.from(inRangeNames))
-          }
-
-          // Create a new single-page PDF and build filtered /OCProperties
-          const newDoc = await PDFDocument.create()
-          const [copiedPage] = await newDoc.copyPages(origDoc, [artboard.pageNum - 1])
-          newDoc.addPage(copiedPage)
-
-          if (containerIdx >= 0 && inRangeNames.size > 0) {
-            // Names of ALL OCGs seen via BDC markers (across all artboards in the stream).
-            // OCGs NOT in this set are "supplemented" — they have no BDC markers and can't
-            // be range-attributed. We include them tentatively so they're visible to pdfjs.
-            const preSeenNames = new Set(Array.from(preOcgNames.values()))
-
-            // Find all /OCG objects in the new document and filter:
-            // - Include if name is in inRangeNames (confirmed belongs to this artboard)
-            // - Include if name was NOT seen in the content stream at all (supplemented OCG,
-            //   e.g. *Grafik or !Image with no BDC markers — cannot determine artboard from
-            //   stream position, include tentatively; cross-artboard bleed filtered later)
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const ocgRefs: any[] = []
-            for (const [ref, obj] of newDoc.context.enumerateIndirectObjects()) {
-              if (obj instanceof PDFDict) {
-                const typeEntry = obj.lookup(PDFName.of('Type'))
-                if (typeEntry?.toString() === '/OCG') {
-                  const nameEntry = obj.lookup(PDFName.of('Name'))
-                  // Name can be PDFString "(foo)" or PDFName "/foo"
-                  const rawName = nameEntry?.toString() ?? ''
-                  const ocgName = rawName.startsWith('(')
-                    ? rawName.slice(1, -1) // strip PDF string delimiters
-                    : rawName.replace(/^\//, '') // strip leading slash from PDF name
-                  if (inRangeNames.has(ocgName) || !preSeenNames.has(ocgName)) {
-                    ocgRefs.push(ref)
-                  }
-                }
-              }
-            }
-
-            if (ocgRefs.length > 0) {
-              // Build minimal /OCProperties with only in-range OCGs
-              const ocgArray = newDoc.context.obj(ocgRefs)
-              const defaultCfg = newDoc.context.obj({
-                Type: PDFName.of('OCConfig'),
-                BaseState: PDFName.of('ON'),
-              })
-              const ocProps = newDoc.context.obj({
-                OCGs: ocgArray,
-                D: defaultCfg,
-              })
-              newDoc.catalog.set(PDFName.of('OCProperties'), ocProps)
-              console.log('[AI Import] pdf-lib: filtered /OCProperties to', ocgRefs.length, 'OCGs for artboard', artboard.pageNum)
-            }
-          }
-
-          cleanPdfBytes = await newDoc.save()
-        } catch (e) {
-          console.warn('[AI Import] pdf-lib pre-processing failed, using original PDF:', e)
-        }
-      }
-
-      // Load the clean per-artboard PDF (or fall back to original)
-      let pdf = pdfDocRef.current
-      let effectivePageNum = artboard.pageNum
-      if (cleanPdfBytes) {
-        try {
-          pdf = await pdfjs.getDocument({ data: cleanPdfBytes }).promise
-          effectivePageNum = 1 // clean PDF has only one page
-        } catch (e) {
-          console.warn('[AI Import] Failed to load clean PDF, using original:', e)
-          pdf = pdfDocRef.current
-          effectivePageNum = artboard.pageNum
-        }
-      }
-
-      const page = await pdf.getPage(effectivePageNum)
+      const pdf = pdfDocRef.current
+      const page = await pdf.getPage(artboard.pageNum)
       const vp1 = page.getViewport({ scale: 1 })
 
       // ── Collect all OCGs via operator list (pdfjs v5 #groups is private) ─────
@@ -305,12 +164,15 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const ocgConfig = await pdf.getOptionalContentConfig()
       const firstOpList = await page.getOperatorList()
 
-      // Build OCG parent-child map from the PDF's /OCProperties/D/Order array.
+      // Build OCG parent-child map AND flat ordered list from the PDF's /OCProperties/D/Order array.
       // pdfjs v5 parseNestedOrder converts the raw /Order array into either:
       //   - plain strings (top-level OCG IDs)
       //   - {name: ocgId, order: [...childIds]} objects (grouped/nested OCGs)
       // We handle both formats to correctly capture Illustrator's artboard container hierarchy.
+      // orderFlatList preserves the panel order (top-to-bottom in Illustrator layer panel),
+      // which is used to determine which supplemented OCGs belong to which artboard.
       const ocgParentMap = new Map<string, string | null>()
+      const orderFlatList: string[] = []
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const orderArr = (ocgConfig as any).getOrder?.()
@@ -318,6 +180,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           const parseOrderItem = (item: unknown, parentId: string | null) => {
             if (typeof item === 'string') {
               if (!ocgParentMap.has(item)) ocgParentMap.set(item, parentId)
+              orderFlatList.push(item)
             } else if (item && typeof item === 'object' && !Array.isArray(item)) {
               // pdfjs {name: ocgId, order: [...children]} format
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -325,6 +188,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
               const groupId = group.name ?? null
               if (groupId) {
                 if (!ocgParentMap.has(groupId)) ocgParentMap.set(groupId, parentId)
+                orderFlatList.push(groupId)
                 if (Array.isArray(group.order)) {
                   for (const child of group.order) parseOrderItem(child, groupId)
                 }
@@ -335,6 +199,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           }
           for (const item of orderArr) parseOrderItem(item, null)
           console.log('[AI Import] OCG order map:', Array.from(ocgParentMap.entries()).map(([k, v]) => `${k} → ${v ?? 'top'}`))
+          console.log('[AI Import] OCG flat order list:', orderFlatList)
         }
       } catch { /* getOrder not available; content-stream stack used as fallback */ }
 
@@ -402,35 +267,9 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
       }
 
-      // Supplement allOCGs with any registered OCGs that weren't found by the content-stream scan.
-      // Illustrator sometimes writes sublayer OCGs (especially graphic/image layers) without
-      // active BDC markers in the visible content stream, so they would be missed above.
-      // ocgConfig[Symbol.iterator] yields [id, OptionalContentGroup] pairs from #groups (all registered OCGs).
-      //
-      // IMPORTANT: OCGs are document-level (shared across all pages/artboards). We track
-      // supplemented IDs here so we can later remove any that have no operator-list presence
-      // on this specific page — those belong to other artboards and would cause cross-artboard bleed.
-      const supplementedOCGIds = new Set<string>()
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const cfgIter: Iterator<[string, any]> = (ocgConfig as any)[Symbol.iterator]()
-        const scannedOCGIds = new Set(allOCGs.filter(g => g.isOCG).map(g => g.id))
-        let cfgStep = cfgIter.next()
-        while (!cfgStep.done) {
-          const [ocgId, ocgGroup] = cfgStep.value as [string, any]
-          cfgStep = cfgIter.next()
-          if (!scannedOCGIds.has(ocgId)) {
-            const name = (ocgGroup as any)?.name ?? ocgId
-            // Carry parentId from /Order map so container-based filtering works for graphic layers
-            const parentId = ocgParentMap.get(ocgId) ?? null
-            allOCGs.push({ id: ocgId, name, isOCG: true, parentId })
-            supplementedOCGIds.add(ocgId)
-            console.log(`[AI Import] Supplemented OCG from config: "${name}" (${ocgId})`)
-          }
-        }
-      } catch { /* iterator not available in this pdfjs build */ }
-
-      // Find _-prefixed marker OCGs (Illustrator artboard container layers like _01_Posting_16:9).
+      // ── Step A: Find _-prefixed container markers BEFORE supplement ─────────
+      // This must happen first so we know which artboard we're in before deciding
+      // which supplemented OCGs (those without BDC markers) belong here.
       // Sort DESCENDING by content-stream occurrence: last-in-stream = topmost-in-panel = artboard 1.
       // artboard.pageNum is 1-indexed, so markerOCGs[pageNum-1] is the container for this artboard.
       const markerOCGs = allOCGs
@@ -440,6 +279,58 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         ? (markerOCGs[artboard.pageNum - 1] ?? markerOCGs[markerOCGs.length - 1])
         : null
       const containerOCGId = containerOCG?.id ?? null
+
+      // ── Step B: Compute /Order range for this artboard ───────────────────────
+      // The /OCProperties /D /Order array lists ALL layers in Illustrator panel order.
+      // We find the range [containerPos+1, nextMarkerPos) in this flat list to identify
+      // which supplemented OCGs (no BDC markers) belong to this artboard.
+      // This correctly handles *Grafik, !Image, and other graphic layers that Illustrator
+      // writes into /OCProperties but not into the content stream's BDC markers.
+      let orderRangeIds: Set<string> | null = null
+      if (containerOCGId !== null && orderFlatList.length > 0) {
+        const containerPos = orderFlatList.indexOf(containerOCGId)
+        if (containerPos >= 0) {
+          // Find the next _-marker after containerPos in the flat list
+          let nextMarkerPos = orderFlatList.length
+          for (let k = containerPos + 1; k < orderFlatList.length; k++) {
+            const candidateId = orderFlatList[k]
+            // Look up the name from allOCGs (content-stream scan already collected these)
+            const candidateName = allOCGs.find(g => g.id === candidateId)?.name ?? ''
+            if (candidateName.trimStart().startsWith('_')) {
+              nextMarkerPos = k
+              break
+            }
+          }
+          orderRangeIds = new Set(orderFlatList.slice(containerPos + 1, nextMarkerPos))
+          orderRangeIds.add(containerOCGId) // also include the container marker itself
+          console.log('[AI Import] /Order range for artboard', artboard.pageNum, ':', Array.from(orderRangeIds))
+        }
+      }
+
+      // ── Step C: Supplement allOCGs with registered OCGs not found in content stream ─
+      // Illustrator writes some sublayer OCGs (especially graphic/image layers like *Grafik,
+      // !Image) into /OCProperties but NOT as active BDC markers in the content stream.
+      // ocgConfig[Symbol.iterator] yields [id, OptionalContentGroup] pairs from #groups.
+      // We filter using orderRangeIds so only this artboard's supplemented OCGs are included.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const cfgIter: Iterator<[string, any]> = (ocgConfig as any)[Symbol.iterator]()
+        const scannedOCGIds = new Set(allOCGs.filter(g => g.isOCG).map(g => g.id))
+        let cfgStep = cfgIter.next()
+        while (!cfgStep.done) {
+          const [ocgId, ocgGroup] = cfgStep.value as [string, any]
+          cfgStep = cfgIter.next()
+          if (!scannedOCGIds.has(ocgId)) {
+            // Only add if: no artboard isolation needed (no markers) OR in this artboard's /Order range
+            if (orderRangeIds === null || orderRangeIds.has(ocgId)) {
+              const name = (ocgGroup as any)?.name ?? ocgId
+              const parentId = ocgParentMap.get(ocgId) ?? null
+              allOCGs.push({ id: ocgId, name, isOCG: true, parentId })
+              console.log(`[AI Import] Supplemented OCG from config: "${name}" (${ocgId})`)
+            }
+          }
+        }
+      } catch { /* iterator not available in this pdfjs build */ }
 
       // If a container marker was found, keep it visible so its non-starred sublayers
       // (Background, Element, etc.) remain rendered in the background image.
@@ -459,16 +350,14 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const nextContainerIdx = nextMarker ? (ocgFirstOccurrence.get(nextMarker.id) ?? Infinity) : Infinity
 
       // Effective OCGs: *-prefixed and !-prefixed layers belonging to this artboard.
-      // When a container marker exists, use the content-stream range filter — this is the
-      // only reliable isolation method because Illustrator writes all artboard layers flat
-      // (non-nested) in every page's stream, making parent-id and stack-based approaches unreliable.
+      // Content-stream range filter isolates BDC-present layers; supplemented OCGs (pos=-1)
+      // were already filtered by /Order range in Step C above, so they pass through here.
       const effectiveOCGs = allOCGs.filter(g => {
         const name = g.name.trimStart()
         if (!name.startsWith('*') && !name.startsWith('!')) return false
         if (containerOCGId !== null && containerIdx >= 0) {
-          // Include only OCGs whose first stream appearance is strictly between this artboard's
-          // _-marker and the next artboard's _-marker (or end of stream for artboard 1).
           const pos = ocgFirstOccurrence.get(g.id) ?? -1
+          if (pos === -1) return true // supplemented OCG — already artboard-filtered in Step C
           return pos > containerIdx && pos < nextContainerIdx
         }
         return true // no _-markers → flat single-artboard structure, include all */!-prefixed layers
