@@ -164,7 +164,24 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       // tell us exactly which OCG each text item belongs to.
       const textContent = await page.getTextContent({ includeMarkedContent: true })
 
-      type RichItem = { str: string; vx: number; vy: number; fontSize: number; width: number }
+      // Derive CSS numeric font weight from the resolved font-family string that
+      // pdfjs provides in textContent.styles (e.g. "Helvetica-Light", "Arial,Bold").
+      const parseFontWeight = (fontFamily: string): number => {
+        const f = fontFamily.toLowerCase()
+        if (/thin|hairline/.test(f))             return 100
+        if (/extra.?light|ultra.?light/.test(f)) return 200
+        if (/\blight\b/.test(f))                 return 300
+        if (/demi.?bold|semi.?bold/.test(f))     return 600
+        if (/extra.?bold|ultra.?bold/.test(f))   return 800
+        if (/black|heavy/.test(f))               return 900
+        if (/\bbold\b/.test(f))                  return 700
+        if (/\bmedium\b/.test(f))                return 500
+        return 400 // regular / normal
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const textStyles = (textContent as any).styles as Record<string, { fontFamily: string }> ?? {}
+
+      type RichItem = { str: string; vx: number; vy: number; fontSize: number; width: number; fontName: string }
       // Map from OCG ID → text items found in that OCG's marked content section
       const ocgTextMap = new Map<string, RichItem[]>()
       // Text items outside any OC group (for fallback)
@@ -192,7 +209,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           } else if (typeof it.str === 'string' && it.str.trim()) {
             const [vx, vy] = vp1.convertToViewportPoint(it.transform[4], it.transform[5])
             const fontSize = Math.abs(it.transform[3]) || Math.abs(it.transform[0]) || 12
-            const rich: RichItem = { str: it.str, vx, vy, fontSize, width: it.width ?? 0 }
+            const rich: RichItem = { str: it.str, vx, vy, fontSize, width: it.width ?? 0, fontName: it.fontName ?? '' }
             if (currentOCGId !== null) {
               if (!ocgTextMap.has(currentOCGId)) ocgTextMap.set(currentOCGId, [])
               ocgTextMap.get(currentOCGId)!.push(rich)
@@ -474,13 +491,14 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
           )
           const label = i === 0 ? 'Headline' : i === 1 ? 'Subline' : `Text ${i + 1}`
+          const fontFamily0 = textStyles[block[0].fontName]?.fontFamily ?? block[0].fontName ?? ''
           extractedFields.push({
             type: 'text', layerName: label, value: text, originalText: text,
             x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
             width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
             height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
             scale: 1, opacity: 1, fontSize: fs, color: '#ffffff',
-            fontWeight: fs >= 18 ? 'bold' : 'normal', fontStyle: 'normal', textAlign: 'left',
+            fontWeight: parseFontWeight(fontFamily0), fontStyle: 'normal', textAlign: 'left',
           })
         })
       } else {
@@ -520,13 +538,14 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
               Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
             )
           }
+          const fontFamilyOCG = textStyles[block[0].fontName]?.fontFamily ?? block[0].fontName ?? ''
           extractedFields.push({
             type: 'text', layerName, value: text, originalText: text,
             x: Math.max(0, minVx / vp1.width), y: Math.max(0, topVy / vp1.height),
             width: Math.min(0.95, Math.max(0.4, (maxVx - minVx) / vp1.width)),
             height: Math.max(0.05, (bottomVy - topVy) / vp1.height),
             scale: 1, opacity: 1, fontSize: fs, color: '#ffffff',
-            fontWeight: fs >= 18 ? 'bold' : 'normal', fontStyle: 'normal', textAlign: 'left',
+            fontWeight: parseFontWeight(fontFamilyOCG), fontStyle: 'normal', textAlign: 'left',
           })
         }
 
@@ -859,7 +878,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             type: 'graphic', layerName, isImageSlot, value: '', originalText: '',
             imageUrl, scale: 1, opacity: 1,
             x: gx, y: gy, width: gw, height: gh,
-            fontSize: 0, color: '#ffffff', fontWeight: 'normal', fontStyle: 'normal', textAlign: 'left',
+            fontSize: 0, color: '#ffffff', fontWeight: 400, fontStyle: 'normal', textAlign: 'left',
           })
         }
       }

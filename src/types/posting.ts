@@ -7,7 +7,7 @@ export interface AIEditableField {
   originalText: string
   fontSize: number       // in artboard native px
   color: string
-  fontWeight: 'normal' | 'bold'
+  fontWeight: number          // CSS numeric weight: 100 Thin … 400 Regular … 700 Bold … 900 Black
   fontStyle: 'normal' | 'italic'
   textAlign: 'left' | 'center' | 'right'
   // graphic fields
