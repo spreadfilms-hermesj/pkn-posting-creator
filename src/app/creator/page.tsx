@@ -19,7 +19,7 @@ function ArtboardVariantSwitcher({
   onSwitch: (i: number) => void
 }) {
   return (
-    <div className="flex items-center gap-3 px-6 py-3 border-t border-white/10 bg-black/30 overflow-x-auto flex-shrink-0">
+    <div className="flex items-center gap-3 px-6 py-3 border-t border-white/10 bg-black/40 backdrop-blur-md overflow-x-auto">
       {variants.map((v, i) => (
         <button
           key={i}
@@ -176,20 +176,22 @@ export default function CreatorPage() {
         {/* Main Layout */}
         <div className="flex h-[calc(100vh-57px)]">
           <CreatorSidebar config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} />
-          <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+          <div className="relative flex-1 min-w-0 overflow-hidden">
             <PreviewCanvas config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} onSelectField={setSelectedFieldIndex} />
             {config.aiImportVariants && config.aiImportVariants.variants.length > 1 && (
-              <ArtboardVariantSwitcher
-                variants={config.aiImportVariants.variants}
-                activeIndex={config.aiImportVariants.activeVariantIndex}
-                onSwitch={(i) => {
-                  const vars = config.aiImportVariants!
-                  updateConfig({
-                    aiImport: vars.variants[i],
-                    aiImportVariants: { ...vars, activeVariantIndex: i },
-                  })
-                }}
-              />
+              <div className="absolute bottom-0 left-0 right-0 z-20">
+                <ArtboardVariantSwitcher
+                  variants={config.aiImportVariants.variants}
+                  activeIndex={config.aiImportVariants.activeVariantIndex}
+                  onSwitch={(i) => {
+                    const vars = config.aiImportVariants!
+                    updateConfig({
+                      aiImport: vars.variants[i],
+                      aiImportVariants: { ...vars, activeVariantIndex: i },
+                    })
+                  }}
+                />
+              </div>
             )}
           </div>
         </div>
