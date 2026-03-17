@@ -443,22 +443,6 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       const artW_px = Math.round(renderVp.width)
       const artH_px = Math.round(renderVp.height)
 
-      // Force all effective OCGs visible for full render (some may default to hidden).
-      // Also ensure any _-container OCGs are visible so their children can be rendered.
-      const fullRenderCfg = await pdf.getOptionalContentConfig()
-      for (const { id, isOCG } of effectiveOCGs) {
-        if (isOCG) try { fullRenderCfg.setVisibility(id, true) } catch { /* unsupported */ }
-      }
-      for (const { id, isOCG } of allOCGs) {
-        if (isOCG && containerIds.has(id)) try { fullRenderCfg.setVisibility(id, true) } catch { /* unsupported */ }
-      }
-
-      // fullCanvas = artboard-sized render with all layers visible (used for artboard diff fallback)
-      const fullCanvas = document.createElement('canvas')
-      fullCanvas.width = artW_px; fullCanvas.height = artH_px
-      const fullCtx = fullCanvas.getContext('2d', { willReadFrequently: true })!
-      await page.render({ canvas: fullCanvas, canvasContext: fullCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(fullRenderCfg) }).promise
-
       // ── Build font-weight map from pdfjs commonObjs ───────────────────────
       // After the first render, pdfjs has fully loaded all fonts into commonObjs.
       // PDFObjects exposes Symbol.iterator yielding [objId, FontFaceObject] pairs.
@@ -697,22 +681,6 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         bgCtx.fillRect(cx, cy, cw, ch)
       }
 
-      // Helper: pixel-diff two canvases and return bounding box of differing pixels
-      const pixelDiff = (aData: Uint8ClampedArray, bData: Uint8ClampedArray, w: number, h: number, threshold = 25) => {
-        let minX = w, maxX = -1, minY = h, maxY = -1
-        for (let py = 0; py < h; py++) {
-          for (let px2 = 0; px2 < w; px2++) {
-            const idx = (py * w + px2) * 4
-            const diff = Math.abs(aData[idx] - bData[idx]) + Math.abs(aData[idx + 1] - bData[idx + 1]) + Math.abs(aData[idx + 2] - bData[idx + 2])
-            if (diff > threshold) {
-              minX = Math.min(minX, px2); maxX = Math.max(maxX, px2)
-              minY = Math.min(minY, py);  maxY = Math.max(maxY, py)
-            }
-          }
-        }
-        return maxX >= minX && maxY >= minY ? { minX, maxX, minY, maxY } : null
-      }
-
       // ── Build extracted fields ─────────────────────────────────────────────
       const extractedFields: AIEditableField[] = []
 
@@ -798,377 +766,59 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           })
         }
 
-        // ── Pre-render "full overflow" canvas for graphic extraction ─────
-        // Gradient fills in Illustrator use PDF sh (paintShading) operators that
-        // paint over the CURRENT CLIPPING REGION. In isolation (only this OCG
-        // visible), the clipping region is the whole canvas — so the gradient floods
-        // the entire bbox. In the full render, the clipping region is correctly set
-        // by the surrounding path/clip context. Therefore we use a "full vs without
-        // this OCG" diff so clip paths are always active during rendering.
-
-        // Overflow canvas dimensions (used for elements that touch artboard boundaries)
-        const ofPad = Math.round(200 * renderScale)
-        const ofW = artW_px + 2 * ofPad
-        const ofH = artH_px + 2 * ofPad
-
-        // Helper: pixel-diff two renders → isolated element canvas.
-        // Use `srcData` pixel colors for pixels that differ from `baseData`.
-        // Pixels matching baseline become transparent. Handles gradients correctly
-        // because both renders include the full PDF clipping context.
-        const diffToIsolated = (
-          srcData: Uint8ClampedArray, baseData: Uint8ClampedArray, w: number, h: number
-        ): { canvas: HTMLCanvasElement; bbox: { minX: number; minY: number; maxX: number; maxY: number } | null } => {
-          const c = document.createElement('canvas')
-          c.width = w; c.height = h
-          const ctx = c.getContext('2d')!
-          const img = ctx.createImageData(w, h)
-          const d = img.data
-          let minX = w, minY = h, maxX = -1, maxY = -1
-          for (let y = 0; y < h; y++) {
-            for (let x = 0; x < w; x++) {
-              const idx = (y * w + x) * 4
-              const diff = Math.abs(srcData[idx] - baseData[idx])
-                + Math.abs(srcData[idx + 1] - baseData[idx + 1])
-                + Math.abs(srcData[idx + 2] - baseData[idx + 2])
-              if (diff > 8) {
-                d[idx] = srcData[idx]; d[idx + 1] = srcData[idx + 1]
-                d[idx + 2] = srcData[idx + 2]; d[idx + 3] = 255
-                if (x < minX) minX = x; if (x > maxX) maxX = x
-                if (y < minY) minY = y; if (y > maxY) maxY = y
-              }
-            }
-          }
-          ctx.putImageData(img, 0, 0)
-          return { canvas: c, bbox: maxX >= minX && maxY >= minY ? { minX, minY, maxX, maxY } : null }
-        }
-
-        // Fill transparent "interior holes" in a graphic canvas caused by PDF text knockout.
-        // In Illustrator, text inside a shape group can use a knockout blend that punches
-        // through the shape fill during PDF rendering. This recovers the solid shape by:
-        //   1. Computing the average color of all non-transparent pixels (the shape color)
-        //   2. For each scanline, filling transparent pixels that lie between non-transparent
-        //      boundary pixels — i.e. interior holes, not exterior empty space.
-        const fillInteriorHoles = (c: HTMLCanvasElement): void => {
-          const hCtx = c.getContext('2d', { willReadFrequently: true })
-          if (!hCtx) return
-          const w = c.width, h = c.height
-          const img = hCtx.getImageData(0, 0, w, h)
-          const d = img.data
-          // Average color of non-transparent pixels (shape fill color, e.g. blue)
-          let sumR = 0, sumG = 0, sumB = 0, cnt = 0
-          for (let i = 0; i < d.length; i += 4) {
-            if (d[i + 3] > 32) { sumR += d[i]; sumG += d[i + 1]; sumB += d[i + 2]; cnt++ }
-          }
-          if (cnt === 0) return
-          const avgR = Math.round(sumR / cnt), avgG = Math.round(sumG / cnt), avgB = Math.round(sumB / cnt)
-          // Scanline: fill transparent gaps between non-transparent pixels on each row
-          for (let y = 0; y < h; y++) {
-            let firstX = -1, lastX = -1
-            for (let x = 0; x < w; x++) {
-              if (d[(y * w + x) * 4 + 3] > 32) { if (firstX === -1) firstX = x; lastX = x }
-            }
-            if (firstX < 0 || firstX === lastX) continue
-            for (let x = firstX; x <= lastX; x++) {
-              const idx = (y * w + x) * 4
-              if (d[idx + 3] <= 32) { d[idx] = avgR; d[idx + 1] = avgG; d[idx + 2] = avgB; d[idx + 3] = 255 }
-            }
-          }
-          hCtx.putImageData(img, 0, 0)
-        }
-
-
         // ── Process graphic OCGs ──────────────────────────────────────────
         for (const { id: ocgId, name: ocgRawName, isOCG: ocgIsRegistered } of graphicStarredOCGs) {
           const layerName = ocgRawName.replace(/^\s*[*!]/, '').trim()
           const isImageSlot = ocgRawName.trimStart().startsWith('!')
-          console.log(`[AI Import] Extracting graphic: "${layerName}" (${ocgId})`)
+          console.log(`[AI Import] Isolated layer render: "${layerName}" (${ocgId})`)
 
+          // Render this OCG in complete isolation: hide ALL other OCGs, show only this one.
+          // This is the same way Illustrator separates layers — each layer renders cleanly
+          // without blend-mode or knockout effects from other layers contaminating it.
+          // The result is a full-artboard PNG (transparent where this layer has no content)
+          // that stacks correctly on top of the background at position (0, 0).
           let imageUrl: string | undefined
-          let gx = 0.05, gy = 0.3, gw = 0.4, gh = 0.4
-          const pad2 = 16
 
-          // Helper: crop a rect from a canvas, set normalized position.
-          const applyGraphicCropFrom = (
-            srcCanvas: HTMLCanvasElement, cropX: number, cropY: number, cropW: number, cropH: number,
-            offsetX: number, offsetY: number
-          ) => {
-            if (cropW <= 4 || cropH <= 4) return false
-            const cc = document.createElement('canvas')
-            cc.width = cropW; cc.height = cropH
-            cc.getContext('2d')!.drawImage(srcCanvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH)
-            imageUrl = cc.toDataURL('image/png')
-            gx = (cropX - offsetX) / artW_px
-            gy = (cropY - offsetY) / artH_px
-            gw = cropW / artW_px
-            gh = cropH / artH_px
-            const bgX = Math.max(0, cropX - offsetX)
-            const bgY = Math.max(0, cropY - offsetY)
-            const bgW = Math.min(artW_px - bgX, cropW - Math.max(0, offsetX - cropX))
-            const bgH = Math.min(artH_px - bgY, cropH - Math.max(0, offsetY - cropY))
-            // Only paintOver for unregistered sublayers (isOCG: false) — registered OCGs
-            // are already absent from bgCanvas via setVisibility; calling paintOver on them
-            // destroys the photo/background pixels behind the element.
-            if (bgW > 0 && bgH > 0 && !ocgIsRegistered) paintOver(bgX, bgY, bgW, bgH)
-            return true
-          }
-
-          // Step 1 — Extract this graphic layer using the best diff strategy:
-          //
-          // • Raster image layers (hasImage=true) OR isOCG:false sublayers with a parent:
-          //   → Solo-vs-none diff: render only this OCG vs all hidden.
-          //     Isolates the raster from other elements without bleed.
-          //
-          // • Vector / gradient layers (hasImage=false, isOCG:true):
-          //   → Full-vs-without diff: render all OCGs vs all except this one.
-          //     Gradient fills use PDF sh operators that clip to the CURRENT clipping
-          //     region. In solo-only mode the clip is the full canvas, flooding it.
-          //     Full render preserves the clip context so gradients stay bounded.
-          const hasImage = ocgHasImage.get(ocgId) ?? false
-          const parentId = ocgParentId.get(ocgId) ?? null
-          // The effective registered OCG id we can call setVisibility on:
-          // • for registered OCGs: use ocgId directly
-          // • for isOCG:false sublayers: use their parent registered OCG (if known)
-          const visId = ocgIsRegistered ? ocgId : parentId
-
-          let baseCanvas: HTMLCanvasElement | null = null
-          let artBBox: { minX: number; minY: number; maxX: number; maxY: number } | null = null
-
-          if (visId && (hasImage || !ocgIsRegistered || ocgIsMixed.has(ocgId))) {
-            // ── Solo-vs-none diff (raster images / sublayers / mixed OCGs) ──────
-            // Mixed OCGs (*Textbox etc.) use solo-vs-none to extract the clean isolated
-            // shape without blend-mode effects from surrounding layers being baked in.
-            try {
-              const soloCfg = await pdf.getOptionalContentConfig()
-              const noneCfg = await pdf.getOptionalContentConfig()
-              for (const { id, isOCG } of allOCGs) {
-                if (isOCG) {
-                  try { soloCfg.setVisibility(id, false) } catch { /* unsupported */ }
-                  try { noneCfg.setVisibility(id, false) } catch { /* unsupported */ }
-                }
-              }
-              try { soloCfg.setVisibility(visId, true) } catch { /* unsupported */ }
-
-              const soloCanvas = document.createElement('canvas')
-              soloCanvas.width = artW_px; soloCanvas.height = artH_px
-              const soloCtx = soloCanvas.getContext('2d', { willReadFrequently: true })!
-              await page.render({ canvas: soloCanvas, canvasContext: soloCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(soloCfg) }).promise
-
-              const noneCanvas = document.createElement('canvas')
-              noneCanvas.width = artW_px; noneCanvas.height = artH_px
-              const noneCtx = noneCanvas.getContext('2d', { willReadFrequently: true })!
-              await page.render({ canvas: noneCanvas, canvasContext: noneCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(noneCfg) }).promise
-
-              const { canvas, bbox } = diffToIsolated(
-                soloCtx.getImageData(0, 0, artW_px, artH_px).data,
-                noneCtx.getImageData(0, 0, artW_px, artH_px).data,
-                artW_px, artH_px
-              )
-              if (bbox) {
-                if (ocgIsMixed.has(ocgId)) fillInteriorHoles(canvas)
-                baseCanvas = canvas; artBBox = bbox
-              }
-              console.log(`[AI Import] Solo/none diff for "${layerName}": bbox=${JSON.stringify(bbox)}`)
-            } catch (e) {
-              console.warn(`[AI Import] Solo/none diff failed for "${layerName}":`, e)
+          try {
+            const isolateCfg = await pdf.getOptionalContentConfig()
+            // Hide all registered OCGs
+            for (const { id, isOCG } of allOCGs) {
+              if (isOCG) try { isolateCfg.setVisibility(id, false) } catch { /* unsupported */ }
             }
+            // Show only this OCG (or its parent if it's an unregistered sublayer)
+            const targetId = ocgIsRegistered ? ocgId : (ocgParentId.get(ocgId) ?? null)
+            if (targetId) try { isolateCfg.setVisibility(targetId, true) } catch { /* unsupported */ }
 
-            // Fallback for raster images: if solo-vs-none produced no bbox (image may not be
-            // OCG-controlled in pdfjs isolation mode), try full-vs-without. Unlike gradients,
-            // rasters don't have clip-flooding issues so this is safe.
-            if (!artBBox && hasImage && ocgIsRegistered) {
-              try {
-                const withoutCfg = await pdf.getOptionalContentConfig()
-                try { withoutCfg.setVisibility(ocgId, false) } catch { /* unsupported */ }
-                const withoutCanvas = document.createElement('canvas')
-                withoutCanvas.width = artW_px; withoutCanvas.height = artH_px
-                const withoutCtx = withoutCanvas.getContext('2d', { willReadFrequently: true })!
-                await page.render({ canvas: withoutCanvas, canvasContext: withoutCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
-                const { canvas, bbox } = diffToIsolated(
-                  fullCtx.getImageData(0, 0, artW_px, artH_px).data,
-                  withoutCtx.getImageData(0, 0, artW_px, artH_px).data,
-                  artW_px, artH_px
-                )
-                if (bbox) { baseCanvas = canvas; artBBox = bbox }
-                console.log(`[AI Import] Image fallback full/without diff for "${layerName}": bbox=${JSON.stringify(bbox)}`)
-              } catch (e) {
-                console.warn(`[AI Import] Image fallback diff failed for "${layerName}":`, e)
-              }
+            const layerCanvas = document.createElement('canvas')
+            layerCanvas.width = artW_px; layerCanvas.height = artH_px
+            const layerCtx = layerCanvas.getContext('2d', { willReadFrequently: true })!
+            await page.render({
+              canvas: layerCanvas, canvasContext: layerCtx, viewport: renderVp,
+              optionalContentConfigPromise: Promise.resolve(isolateCfg),
+              background: 'transparent',
+            }).promise
+
+            // Check that the layer actually rendered something
+            const layerData = layerCtx.getImageData(0, 0, artW_px, artH_px).data
+            let hasContent = false
+            for (let i = 3; i < layerData.length; i += 4) {
+              if (layerData[i] > 16) { hasContent = true; break }
             }
-          } else if (ocgIsRegistered && !hasImage) {
-            // ── Full-vs-without diff (vector / gradient layers) ───────────────
-            // Both renders include ALL non-OCG page content + clipping context,
-            // so gradient sh operators are correctly bounded by their clip paths.
-            try {
-              const withoutCfg = await pdf.getOptionalContentConfig()
-              try { withoutCfg.setVisibility(ocgId, false) } catch { /* unsupported */ }
-
-              const withoutCanvas = document.createElement('canvas')
-              withoutCanvas.width = artW_px; withoutCanvas.height = artH_px
-              const withoutCtx = withoutCanvas.getContext('2d', { willReadFrequently: true })!
-              await page.render({ canvas: withoutCanvas, canvasContext: withoutCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(withoutCfg) }).promise
-
-              const { canvas, bbox } = diffToIsolated(
-                fullCtx.getImageData(0, 0, artW_px, artH_px).data,
-                withoutCtx.getImageData(0, 0, artW_px, artH_px).data,
-                artW_px, artH_px
-              )
-              if (bbox) { baseCanvas = canvas; artBBox = bbox }
-              console.log(`[AI Import] Full/without diff for "${layerName}": bbox=${JSON.stringify(bbox)}`)
-            } catch (e) {
-              console.warn(`[AI Import] Full/without diff failed for "${layerName}":`, e)
+            if (hasContent) {
+              imageUrl = layerCanvas.toDataURL('image/png')
             }
-          }
-
-          // Step 2 — if bbox touches a boundary, capture overflow on padded canvas
-          if (!imageUrl && artBBox) {
-            const touchesRight  = artBBox.maxX >= artW_px - 4
-            const touchesLeft   = artBBox.minX <= 4
-            const touchesTop    = artBBox.minY <= 4
-            const touchesBottom = artBBox.maxY >= artH_px - 4
-
-            const canDoOverflow = visId && (touchesRight || touchesLeft || touchesTop || touchesBottom)
-            if (canDoOverflow) {
-              const overflowPad = ofPad
-              const overflowW = ofW
-              const overflowH = ofH
-              try {
-                // Use same diff strategy as Step 1 but on a padded overflow canvas
-                const makeOFCanvas = async (cfg: Awaited<ReturnType<typeof pdf.getOptionalContentConfig>>) => {
-                  const c = document.createElement('canvas')
-                  c.width = overflowW; c.height = overflowH
-                  const ctx = c.getContext('2d', { willReadFrequently: true })!
-                  ctx.translate(overflowPad, overflowPad)
-                  let clipSkipped = false
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  ;(ctx as any).clip = function(...args: unknown[]) {
-                    if (!clipSkipped) { clipSkipped = true; ctx.beginPath(); return }
-                    CanvasRenderingContext2D.prototype.clip.apply(ctx, args as Parameters<CanvasRenderingContext2D['clip']>)
-                  }
-                  await page.render({ canvas: c, canvasContext: ctx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(cfg) }).promise
-                  ctx.setTransform(1, 0, 0, 1, 0, 0)
-                  return ctx.getImageData(0, 0, overflowW, overflowH).data
-                }
-
-                let ofSrcData: Uint8ClampedArray, ofBaseData: Uint8ClampedArray
-                if (hasImage || !ocgIsRegistered) {
-                  // Solo-vs-none for raster images / sublayers
-                  const soloOFCfg = await pdf.getOptionalContentConfig()
-                  const noneOFCfg = await pdf.getOptionalContentConfig()
-                  for (const { id, isOCG } of allOCGs) {
-                    if (isOCG) {
-                      try { soloOFCfg.setVisibility(id, false) } catch { /* unsupported */ }
-                      try { noneOFCfg.setVisibility(id, false) } catch { /* unsupported */ }
-                    }
-                  }
-                  try { soloOFCfg.setVisibility(visId!, true) } catch { /* unsupported */ }
-                  ofSrcData = await makeOFCanvas(soloOFCfg)
-                  ofBaseData = await makeOFCanvas(noneOFCfg)
-                } else {
-                  // Full-vs-without for vector/gradient layers
-                  const withoutOFCfg = await pdf.getOptionalContentConfig()
-                  try { withoutOFCfg.setVisibility(ocgId, false) } catch { /* unsupported */ }
-                  ofSrcData = await makeOFCanvas(fullRenderCfg)
-                  ofBaseData = await makeOFCanvas(withoutOFCfg)
-                }
-
-                const { canvas: resultOFCanvas } = diffToIsolated(ofSrcData, ofBaseData, overflowW, overflowH)
-                if (ocgIsMixed.has(ocgId)) fillInteriorHoles(resultOFCanvas)
-                const resultData = resultOFCanvas.getContext('2d', { willReadFrequently: true })!
-                  .getImageData(0, 0, overflowW, overflowH).data
-                const isVisible = (idx: number) => resultData[idx + 3] > 10
-
-                const margin = Math.round(20 * renderScale)
-                let extMinX = artBBox.minX + overflowPad
-                let extMinY = artBBox.minY + overflowPad
-                let extMaxX = artBBox.maxX + overflowPad
-                let extMaxY = artBBox.maxY + overflowPad
-                let foundOverflow = false
-
-                if (touchesRight) {
-                  const bx0 = artW_px + overflowPad
-                  const bx1 = Math.min(overflowW - 1, bx0 + overflowPad)
-                  const by0 = Math.max(0, artBBox.minY + overflowPad - margin)
-                  const by1 = Math.min(overflowH - 1, artBBox.maxY + overflowPad + margin)
-                  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
-                    if (isVisible((y * overflowW + x) * 4)) {
-                      extMaxX = Math.max(extMaxX, x); extMinY = Math.min(extMinY, y); extMaxY = Math.max(extMaxY, y); foundOverflow = true
-                    }
-                  }
-                }
-                if (touchesLeft) {
-                  const bx1 = overflowPad
-                  const bx0 = Math.max(0, bx1 - overflowPad)
-                  const by0 = Math.max(0, artBBox.minY + overflowPad - margin)
-                  const by1 = Math.min(overflowH - 1, artBBox.maxY + overflowPad + margin)
-                  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
-                    if (isVisible((y * overflowW + x) * 4)) {
-                      extMinX = Math.min(extMinX, x); extMinY = Math.min(extMinY, y); extMaxY = Math.max(extMaxY, y); foundOverflow = true
-                    }
-                  }
-                }
-                if (touchesBottom) {
-                  const by0 = artH_px + overflowPad
-                  const by1 = Math.min(overflowH - 1, by0 + overflowPad)
-                  const bx0 = Math.max(0, artBBox.minX + overflowPad - margin)
-                  const bx1 = Math.min(overflowW - 1, artBBox.maxX + overflowPad + margin)
-                  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
-                    if (isVisible((y * overflowW + x) * 4)) {
-                      extMaxY = Math.max(extMaxY, y); extMinX = Math.min(extMinX, x); extMaxX = Math.max(extMaxX, x); foundOverflow = true
-                    }
-                  }
-                }
-                if (touchesTop) {
-                  const by1 = overflowPad
-                  const by0 = Math.max(0, by1 - overflowPad)
-                  const bx0 = Math.max(0, artBBox.minX + overflowPad - margin)
-                  const bx1 = Math.min(overflowW - 1, artBBox.maxX + overflowPad + margin)
-                  for (let y = by0; y <= by1; y++) for (let x = bx0; x <= bx1; x++) {
-                    if (isVisible((y * overflowW + x) * 4)) {
-                      extMinY = Math.min(extMinY, y); extMinX = Math.min(extMinX, x); extMaxX = Math.max(extMaxX, x); foundOverflow = true
-                    }
-                  }
-                }
-
-                if (foundOverflow) {
-                  const cropX = Math.max(0, extMinX - pad2)
-                  const cropY = Math.max(0, extMinY - pad2)
-                  const cropW = Math.min(overflowW - cropX, extMaxX - extMinX + pad2 * 2)
-                  const cropH = Math.min(overflowH - cropY, extMaxY - extMinY + pad2 * 2)
-                  applyGraphicCropFrom(resultOFCanvas, cropX, cropY, cropW, cropH, overflowPad, overflowPad)
-                }
-              } catch (e) {
-                console.warn(`[AI Import] Overflow capture failed for "${layerName}":`, e)
-              }
-            }
-          }
-
-          // Step 3 — element fully inside artboard: crop from baseCanvas
-          if (!imageUrl && artBBox && baseCanvas) {
-            const cropX = Math.max(0, artBBox.minX - pad2)
-            const cropY = Math.max(0, artBBox.minY - pad2)
-            const cropW = Math.min(artW_px - cropX, artBBox.maxX - artBBox.minX + pad2 * 2)
-            const cropH = Math.min(artH_px - cropY, artBBox.maxY - artBBox.minY + pad2 * 2)
-            applyGraphicCropFrom(baseCanvas, cropX, cropY, cropW, cropH, 0, 0)
-          }
-
-          // Final fallback: operator list bbox (artboard-space coords)
-          if (!imageUrl) {
-            const opBBox = ocgPathBBox.get(ocgId)
-            if (opBBox && opBBox.maxX > opBBox.minX && opBBox.maxY > opBBox.minY) {
-              const cropX = Math.max(0, Math.floor(opBBox.minX) - pad2)
-              const cropY = Math.max(0, Math.floor(opBBox.minY) - pad2)
-              const cropW = Math.min(artW_px - cropX, Math.ceil(opBBox.maxX - opBBox.minX) + pad2 * 2)
-              const cropH = Math.min(artH_px - cropY, Math.ceil(opBBox.maxY - opBBox.minY) + pad2 * 2)
-              applyGraphicCropFrom(fullCanvas, cropX, cropY, cropW, cropH, 0, 0)
-            }
+          } catch (e) {
+            console.warn(`[AI Import] Isolated render failed for "${layerName}":`, e)
           }
 
           if (!imageUrl) continue
 
           extractedFields.push({
             type: 'graphic', layerName, isImageSlot, value: '', originalText: '',
-            imageUrl, scale: 1, opacity: 1,
-            x: gx, y: gy, width: gw, height: gh,
+            imageUrl,
+            // Full artboard position — the PNG is transparent everywhere except this layer
+            x: 0, y: 0, width: 1, height: 1,
+            scale: 1, opacity: 1,
             fontSize: 0, color: '#ffffff', fontWeight: 400, fontStyle: 'normal', textAlign: 'left',
           })
         }
