@@ -580,8 +580,9 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             ocgHasImage.set(inOCG, true)
           }
 
-          // Track path coordinates for graphic OCGs (bounding box)
-          if (!ocgIsText.get(inOCG)) {
+          // Track path coordinates for ALL OCGs (including text OCGs)
+          // so we can detect "mixed" OCGs that have both shapes and text operators.
+          {
             const addPoint = (ux: number, uy: number) => {
               const [vpx, vpy] = vp1.convertToViewportPoint(ux, uy)
               const cx2 = vpx * renderScale, cy2 = vpy * renderScale
@@ -620,6 +621,20 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       console.log('[AI Import] OCG parent ids:', Array.from(ocgParentId.entries()))
       console.log('[AI Import] OCG path bboxes:', Array.from(ocgPathBBox.entries()))
 
+      // Detect "mixed" OCGs: both shape/path operators AND text operators.
+      // Example: *Textbox = blue banner shape (paths) + text in a sub-layer BDC
+      // that pdfjs attributes to the parent OCG. The shape is the primary element.
+      // Reclassify as GRAPHIC and extract via solo-vs-none diff (clean isolated shape,
+      // no blend-mode artifacts from surrounding layers like arrows or overlays).
+      const ocgIsMixed = new Set<string>()
+      for (const ocg of effectiveOCGs) {
+        if (ocgIsText.get(ocg.id) === true && ocgPathBBox.has(ocg.id)) {
+          ocgIsText.set(ocg.id, false)
+          ocgIsMixed.add(ocg.id)
+          console.log(`[AI Import] Mixed OCG reclassified as GRAPHIC (solo-diff): "${ocg.name}"`)
+        }
+      }
+
       // Separate and order OCGs
       // Sort in DESCENDING ocgFirstIdx order: PDF draws bottom-to-top, so descending = Illustrator top-to-bottom layer order
       const sortedEffectiveOCGs = [...effectiveOCGs].sort(
@@ -631,14 +646,13 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       console.log('[AI Import] Text OCGs (ordered):', textStarredOCGs.map(g => g.name))
       console.log('[AI Import] Graphic OCGs:', graphicStarredOCGs.map(g => g.name))
 
-      // ── Render background — graphic OCGs hidden, text OCGs kept visible ───
-      // Text OCGs (e.g. *Textbox) can contain background shapes with opacity that
-      // interact via PDF compositing with surrounding layers. Hiding them via
-      // setVisibility removes those shapes and causes transparency cutouts.
-      // Keep text OCGs visible; paintOver will erase only the text area instead.
+      // ── Render background (all effective OCG layers hidden) ───────────────
+      // bgCanvas is artboard-sized only — used as the displayed background image.
+      // Mixed OCGs (*Textbox etc.) are now reclassified as GRAPHIC above, so they
+      // are correctly hidden here and extracted as clean isolated images instead.
       const bgCfg = await pdf.getOptionalContentConfig()
       for (const { id, isOCG } of effectiveOCGs) {
-        if (isOCG && ocgIsText.get(id) !== true) try { bgCfg.setVisibility(id, false) } catch { /* unsupported */ }
+        if (isOCG) try { bgCfg.setVisibility(id, false) } catch { /* unsupported */ }
       }
       // Keep _-containers visible so non-starred sublayers (Background etc.) stay rendered
       for (const { id, isOCG } of allOCGs) {
@@ -885,8 +899,10 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           let baseCanvas: HTMLCanvasElement | null = null
           let artBBox: { minX: number; minY: number; maxX: number; maxY: number } | null = null
 
-          if (visId && (hasImage || !ocgIsRegistered)) {
-            // ── Solo-vs-none diff (raster images / sublayers) ─────────────────
+          if (visId && (hasImage || !ocgIsRegistered || ocgIsMixed.has(ocgId))) {
+            // ── Solo-vs-none diff (raster images / sublayers / mixed OCGs) ──────
+            // Mixed OCGs (*Textbox etc.) use solo-vs-none to extract the clean isolated
+            // shape without blend-mode effects from surrounding layers being baked in.
             try {
               const soloCfg = await pdf.getOptionalContentConfig()
               const noneCfg = await pdf.getOptionalContentConfig()
