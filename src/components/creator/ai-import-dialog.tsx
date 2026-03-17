@@ -842,6 +842,40 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           return { canvas: c, bbox: maxX >= minX && maxY >= minY ? { minX, minY, maxX, maxY } : null }
         }
 
+        // Fill transparent "interior holes" in a graphic canvas caused by PDF text knockout.
+        // In Illustrator, text inside a shape group can use a knockout blend that punches
+        // through the shape fill during PDF rendering. This recovers the solid shape by:
+        //   1. Computing the average color of all non-transparent pixels (the shape color)
+        //   2. For each scanline, filling transparent pixels that lie between non-transparent
+        //      boundary pixels — i.e. interior holes, not exterior empty space.
+        const fillInteriorHoles = (c: HTMLCanvasElement): void => {
+          const hCtx = c.getContext('2d', { willReadFrequently: true })
+          if (!hCtx) return
+          const w = c.width, h = c.height
+          const img = hCtx.getImageData(0, 0, w, h)
+          const d = img.data
+          // Average color of non-transparent pixels (shape fill color, e.g. blue)
+          let sumR = 0, sumG = 0, sumB = 0, cnt = 0
+          for (let i = 0; i < d.length; i += 4) {
+            if (d[i + 3] > 32) { sumR += d[i]; sumG += d[i + 1]; sumB += d[i + 2]; cnt++ }
+          }
+          if (cnt === 0) return
+          const avgR = Math.round(sumR / cnt), avgG = Math.round(sumG / cnt), avgB = Math.round(sumB / cnt)
+          // Scanline: fill transparent gaps between non-transparent pixels on each row
+          for (let y = 0; y < h; y++) {
+            let firstX = -1, lastX = -1
+            for (let x = 0; x < w; x++) {
+              if (d[(y * w + x) * 4 + 3] > 32) { if (firstX === -1) firstX = x; lastX = x }
+            }
+            if (firstX < 0 || firstX === lastX) continue
+            for (let x = firstX; x <= lastX; x++) {
+              const idx = (y * w + x) * 4
+              if (d[idx + 3] <= 32) { d[idx] = avgR; d[idx + 1] = avgG; d[idx + 2] = avgB; d[idx + 3] = 255 }
+            }
+          }
+          hCtx.putImageData(img, 0, 0)
+        }
+
 
         // ── Process graphic OCGs ──────────────────────────────────────────
         for (const { id: ocgId, name: ocgRawName, isOCG: ocgIsRegistered } of graphicStarredOCGs) {
@@ -929,7 +963,10 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                 noneCtx.getImageData(0, 0, artW_px, artH_px).data,
                 artW_px, artH_px
               )
-              if (bbox) { baseCanvas = canvas; artBBox = bbox }
+              if (bbox) {
+                if (ocgIsMixed.has(ocgId)) fillInteriorHoles(canvas)
+                baseCanvas = canvas; artBBox = bbox
+              }
               console.log(`[AI Import] Solo/none diff for "${layerName}": bbox=${JSON.stringify(bbox)}`)
             } catch (e) {
               console.warn(`[AI Import] Solo/none diff failed for "${layerName}":`, e)
@@ -1035,6 +1072,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                 }
 
                 const { canvas: resultOFCanvas } = diffToIsolated(ofSrcData, ofBaseData, overflowW, overflowH)
+                if (ocgIsMixed.has(ocgId)) fillInteriorHoles(resultOFCanvas)
                 const resultData = resultOFCanvas.getContext('2d', { willReadFrequently: true })!
                   .getImageData(0, 0, overflowW, overflowH).data
                 const isVisible = (idx: number) => resultData[idx + 3] > 10
