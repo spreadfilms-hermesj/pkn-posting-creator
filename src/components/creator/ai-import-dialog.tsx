@@ -487,71 +487,6 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         }
       } catch { /* iterator not available in this pdfjs build */ }
 
-      // ── Render background (all effective OCG layers hidden) ───────────────
-      // bgCanvas is artboard-sized only — used as the displayed background image
-      const bgCfg = await pdf.getOptionalContentConfig()
-      for (const { id, isOCG } of effectiveOCGs) {
-        if (isOCG) try { bgCfg.setVisibility(id, false) } catch { /* unsupported */ }
-      }
-      // Keep _-containers visible so non-starred sublayers (Background etc.) stay rendered
-      for (const { id, isOCG } of allOCGs) {
-        if (isOCG && containerIds.has(id)) try { bgCfg.setVisibility(id, true) } catch { /* unsupported */ }
-      }
-      const bgCanvas = document.createElement('canvas')
-      bgCanvas.width = artW_px
-      bgCanvas.height = artH_px
-      const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true })!
-      // 'transparent' background tells pdfjs not to pre-fill the canvas with white,
-      // so semi-transparent objects retain their correct alpha channel in the output.
-      await page.render({
-        canvas: bgCanvas, canvasContext: bgCtx, viewport: renderVp,
-        optionalContentConfigPromise: Promise.resolve(bgCfg),
-        background: 'transparent',
-      }).promise
-
-      // "Page background only" canvas: ALL registered OCGs hidden (starred + non-starred).
-      // Used later to distinguish bare page-background pixels (→ transparent, let !-image slots
-      // show through) from design-element pixels (Element, Background overlays → keep opaque).
-      const pageBgCfg = await pdf.getOptionalContentConfig()
-      for (const { id, isOCG } of allOCGs) {
-        if (isOCG) try { pageBgCfg.setVisibility(id, false) } catch { /* unsupported */ }
-      }
-      const pageBgCanvas = document.createElement('canvas')
-      pageBgCanvas.width = artW_px; pageBgCanvas.height = artH_px
-      const pageBgCtx = pageBgCanvas.getContext('2d', { willReadFrequently: true })!
-      await page.render({ canvas: pageBgCanvas, canvasContext: pageBgCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(pageBgCfg), background: 'transparent' }).promise
-      const pageBgData = pageBgCtx.getImageData(0, 0, artW_px, artH_px).data
-
-      // Helper: erase a region from bgCanvas by sampling surrounding color
-      const paintOver = (cx: number, cy: number, cw: number, ch: number) => {
-        if (cw <= 0 || ch <= 0) return
-        const sY = cy > 10 ? cy - 8 : Math.min(cy + ch + 4, bgCanvas.height - 2)
-        const sW = Math.min(cw, bgCanvas.width - cx)
-        if (sW <= 0 || sY < 0 || sY >= bgCanvas.height) return
-        const px = bgCtx.getImageData(cx, sY, sW, 1).data
-        let r = 0, g = 0, b = 0
-        for (let p = 0; p < px.length; p += 4) { r += px[p]; g += px[p + 1]; b += px[p + 2] }
-        const n = px.length / 4
-        bgCtx.fillStyle = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`
-        bgCtx.fillRect(cx, cy, cw, ch)
-      }
-
-      // Helper: pixel-diff two canvases and return bounding box of differing pixels
-      const pixelDiff = (aData: Uint8ClampedArray, bData: Uint8ClampedArray, w: number, h: number, threshold = 25) => {
-        let minX = w, maxX = -1, minY = h, maxY = -1
-        for (let py = 0; py < h; py++) {
-          for (let px2 = 0; px2 < w; px2++) {
-            const idx = (py * w + px2) * 4
-            const diff = Math.abs(aData[idx] - bData[idx]) + Math.abs(aData[idx + 1] - bData[idx + 1]) + Math.abs(aData[idx + 2] - bData[idx + 2])
-            if (diff > threshold) {
-              minX = Math.min(minX, px2); maxX = Math.max(maxX, px2)
-              minY = Math.min(minY, py);  maxY = Math.max(maxY, py)
-            }
-          }
-        }
-        return maxX >= minX && maxY >= minY ? { minX, maxX, minY, maxY } : null
-      }
-
       // ── Operator list: definitively classify each starred OCG ─────────────
       // This is the most reliable method: scan actual drawing operators to check
       // whether each OCG section contains text ops vs path/fill ops.
@@ -696,6 +631,74 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       console.log('[AI Import] Text OCGs (ordered):', textStarredOCGs.map(g => g.name))
       console.log('[AI Import] Graphic OCGs:', graphicStarredOCGs.map(g => g.name))
 
+      // ── Render background — graphic OCGs hidden, text OCGs kept visible ───
+      // Text OCGs (e.g. *Textbox) can contain background shapes with opacity that
+      // interact via PDF compositing with surrounding layers. Hiding them via
+      // setVisibility removes those shapes and causes transparency cutouts.
+      // Keep text OCGs visible; paintOver will erase only the text area instead.
+      const bgCfg = await pdf.getOptionalContentConfig()
+      for (const { id, isOCG } of effectiveOCGs) {
+        if (isOCG && ocgIsText.get(id) !== true) try { bgCfg.setVisibility(id, false) } catch { /* unsupported */ }
+      }
+      // Keep _-containers visible so non-starred sublayers (Background etc.) stay rendered
+      for (const { id, isOCG } of allOCGs) {
+        if (isOCG && containerIds.has(id)) try { bgCfg.setVisibility(id, true) } catch { /* unsupported */ }
+      }
+      const bgCanvas = document.createElement('canvas')
+      bgCanvas.width = artW_px
+      bgCanvas.height = artH_px
+      const bgCtx = bgCanvas.getContext('2d', { willReadFrequently: true })!
+      // 'transparent' background tells pdfjs not to pre-fill the canvas with white,
+      // so semi-transparent objects retain their correct alpha channel in the output.
+      await page.render({
+        canvas: bgCanvas, canvasContext: bgCtx, viewport: renderVp,
+        optionalContentConfigPromise: Promise.resolve(bgCfg),
+        background: 'transparent',
+      }).promise
+
+      // "Page background only" canvas: ALL registered OCGs hidden (starred + non-starred).
+      // Used later to distinguish bare page-background pixels (→ transparent, let !-image slots
+      // show through) from design-element pixels (Element, Background overlays → keep opaque).
+      const pageBgCfg = await pdf.getOptionalContentConfig()
+      for (const { id, isOCG } of allOCGs) {
+        if (isOCG) try { pageBgCfg.setVisibility(id, false) } catch { /* unsupported */ }
+      }
+      const pageBgCanvas = document.createElement('canvas')
+      pageBgCanvas.width = artW_px; pageBgCanvas.height = artH_px
+      const pageBgCtx = pageBgCanvas.getContext('2d', { willReadFrequently: true })!
+      await page.render({ canvas: pageBgCanvas, canvasContext: pageBgCtx, viewport: renderVp, optionalContentConfigPromise: Promise.resolve(pageBgCfg), background: 'transparent' }).promise
+      const pageBgData = pageBgCtx.getImageData(0, 0, artW_px, artH_px).data
+
+      // Helper: erase a region from bgCanvas by sampling surrounding color
+      const paintOver = (cx: number, cy: number, cw: number, ch: number) => {
+        if (cw <= 0 || ch <= 0) return
+        const sY = cy > 10 ? cy - 8 : Math.min(cy + ch + 4, bgCanvas.height - 2)
+        const sW = Math.min(cw, bgCanvas.width - cx)
+        if (sW <= 0 || sY < 0 || sY >= bgCanvas.height) return
+        const px = bgCtx.getImageData(cx, sY, sW, 1).data
+        let r = 0, g = 0, b = 0
+        for (let p = 0; p < px.length; p += 4) { r += px[p]; g += px[p + 1]; b += px[p + 2] }
+        const n = px.length / 4
+        bgCtx.fillStyle = `rgb(${Math.round(r / n)},${Math.round(g / n)},${Math.round(b / n)})`
+        bgCtx.fillRect(cx, cy, cw, ch)
+      }
+
+      // Helper: pixel-diff two canvases and return bounding box of differing pixels
+      const pixelDiff = (aData: Uint8ClampedArray, bData: Uint8ClampedArray, w: number, h: number, threshold = 25) => {
+        let minX = w, maxX = -1, minY = h, maxY = -1
+        for (let py = 0; py < h; py++) {
+          for (let px2 = 0; px2 < w; px2++) {
+            const idx = (py * w + px2) * 4
+            const diff = Math.abs(aData[idx] - bData[idx]) + Math.abs(aData[idx + 1] - bData[idx + 1]) + Math.abs(aData[idx + 2] - bData[idx + 2])
+            if (diff > threshold) {
+              minX = Math.min(minX, px2); maxX = Math.max(maxX, px2)
+              minY = Math.min(minY, py);  maxY = Math.max(maxY, py)
+            }
+          }
+        }
+        return maxX >= minX && maxY >= minY ? { minX, maxX, minY, maxY } : null
+      }
+
       // ── Build extracted fields ─────────────────────────────────────────────
       const extractedFields: AIEditableField[] = []
 
@@ -757,15 +760,14 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           })), vp1.width * 0.95)
           const fs = block[0].fontSize
           const pad = Math.ceil(fs * renderScale * 0.25)
-          // Only paintOver for sublayers that can't be hidden (isOCG: false)
-          if (!textIsOCG) {
-            paintOver(
-              Math.max(0, Math.floor(minVx * renderScale) - pad),
-              Math.max(0, Math.floor(topVy * renderScale) - pad),
-              Math.ceil((maxVx - minVx) * renderScale) + pad * 2,
-              Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
-            )
-          }
+          // Always paintOver: text OCGs are now kept visible in bgCanvas (to preserve
+          // their background shapes), so we must erase the text area via paintOver.
+          paintOver(
+            Math.max(0, Math.floor(minVx * renderScale) - pad),
+            Math.max(0, Math.floor(topVy * renderScale) - pad),
+            Math.ceil((maxVx - minVx) * renderScale) + pad * 2,
+            Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
+          )
           extractedFields.push({
             type: 'text', layerName, value: text, originalText: text,
             x: minVx / vp1.width, y: topVy / vp1.height,
