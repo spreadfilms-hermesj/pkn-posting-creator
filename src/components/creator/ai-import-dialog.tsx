@@ -760,14 +760,20 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           })), vp1.width * 0.95)
           const fs = block[0].fontSize
           const pad = Math.ceil(fs * renderScale * 0.25)
-          // Always paintOver: text OCGs are now kept visible in bgCanvas (to preserve
-          // their background shapes), so we must erase the text area via paintOver.
-          paintOver(
-            Math.max(0, Math.floor(minVx * renderScale) - pad),
-            Math.max(0, Math.floor(topVy * renderScale) - pad),
-            Math.ceil((maxVx - minVx) * renderScale) + pad * 2,
-            Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
-          )
+          // Registered text OCGs are kept visible in bgCanvas (to preserve background shapes).
+          // Don't paintOver them — the text bakes naturally into the background image,
+          // and the editable overlay renders on top. paintOver would flood the area with a
+          // sampled solid color, which destroys gradients/complex banner backgrounds.
+          // Non-registered sublayers (isOCG: false) can't be hidden, so paintOver is still
+          // needed to erase their text from what's already baked into bgCanvas.
+          if (!textIsOCG) {
+            paintOver(
+              Math.max(0, Math.floor(minVx * renderScale) - pad),
+              Math.max(0, Math.floor(topVy * renderScale) - pad),
+              Math.ceil((maxVx - minVx) * renderScale) + pad * 2,
+              Math.ceil((bottomVy - topVy) * renderScale) + pad * 2,
+            )
+          }
           extractedFields.push({
             type: 'text', layerName, value: text, originalText: text,
             x: minVx / vp1.width, y: topVy / vp1.height,
