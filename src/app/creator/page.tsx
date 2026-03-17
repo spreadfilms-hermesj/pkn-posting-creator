@@ -19,12 +19,12 @@ function ArtboardVariantSwitcher({
   onSwitch: (i: number) => void
 }) {
   return (
-    <div className="flex items-center gap-3 px-6 py-3 border-t border-white/10 bg-black/40 backdrop-blur-md overflow-x-auto">
+    <div className="flex flex-col gap-3 px-3 py-4 border-l border-white/10 bg-black/40 backdrop-blur-md overflow-y-auto w-[90px] flex-shrink-0">
       {variants.map((v, i) => (
         <button
           key={i}
           onClick={() => onSwitch(i)}
-          className={`flex flex-col items-center gap-1.5 px-3 py-2 rounded-xl border transition-all flex-shrink-0 ${
+          className={`flex flex-col items-center gap-1.5 px-2 py-2 rounded-xl border transition-all flex-shrink-0 w-full ${
             i === activeIndex
               ? 'border-cyan-400 bg-cyan-500/20 text-cyan-300'
               : 'border-white/10 bg-white/5 text-gray-400 hover:border-white/30 hover:text-white'
@@ -40,7 +40,7 @@ function ArtboardVariantSwitcher({
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={v.backgroundImageUrl} alt={v.artboardName} className="w-full h-full object-cover" />
           </div>
-          <span className="text-[11px] font-medium leading-tight text-center max-w-[80px] truncate">{v.artboardName}</span>
+          <span className="text-[11px] font-medium leading-tight text-center w-full truncate">{v.artboardName}</span>
           <span className="text-[10px] text-gray-500">{v.artboardWidth}×{v.artboardHeight}</span>
         </button>
       ))}
@@ -176,22 +176,20 @@ export default function CreatorPage() {
         {/* Main Layout */}
         <div className="flex h-[calc(100vh-57px)]">
           <CreatorSidebar config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} />
-          <div className="relative flex-1 min-w-0 overflow-hidden">
+          <div className="flex flex-1 min-w-0 overflow-hidden">
             <PreviewCanvas config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} onSelectField={setSelectedFieldIndex} />
             {config.aiImportVariants && config.aiImportVariants.variants.length > 1 && (
-              <div className="absolute bottom-0 left-0 right-0 z-20">
-                <ArtboardVariantSwitcher
-                  variants={config.aiImportVariants.variants}
-                  activeIndex={config.aiImportVariants.activeVariantIndex}
-                  onSwitch={(i) => {
-                    const vars = config.aiImportVariants!
-                    updateConfig({
-                      aiImport: vars.variants[i],
-                      aiImportVariants: { ...vars, activeVariantIndex: i },
-                    })
-                  }}
-                />
-              </div>
+              <ArtboardVariantSwitcher
+                variants={config.aiImportVariants.variants}
+                activeIndex={config.aiImportVariants.activeVariantIndex}
+                onSwitch={(i) => {
+                  const vars = config.aiImportVariants!
+                  updateConfig({
+                    aiImport: vars.variants[i],
+                    aiImportVariants: { ...vars, activeVariantIndex: i },
+                  })
+                }}
+              />
             )}
           </div>
         </div>
