@@ -67,10 +67,13 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
             const top = field.y * artboardHeight
             const w = field.width * artboardWidth
             const h = field.height * artboardHeight
-            // Image-slot layers (!-prefixed) sit BELOW all other editable fields (z=1),
-            // above the background canvas which has a transparent hole punched at this region.
-            // Background canvas is z=2. Other editable fields (text, *Grafik) are z=3.
+            // Image-slot layers (!-prefixed) sit BELOW all other editable fields (z=1).
+            // Background canvas is z=2. Other fields use descending zIndex so that
+            // editableFields[0] (topmost Illustrator layer) renders on top and the last
+            // field (bottommost layer) sits just above the background — preserving the
+            // exact layer order from the Illustrator panel.
             const isImageLayer = field.isImageSlot === true
+            const layerZ = isImageLayer ? 1 : (editableFields.length - i + 3)
             const sharedStyle: React.CSSProperties = {
               position: 'absolute',
               left,
@@ -80,7 +83,7 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
               outlineOffset: 6,
               borderRadius: 2,
               opacity: field.opacity ?? 1,
-              zIndex: isImageLayer ? 1 : 3,
+              zIndex: layerZ,
             }
 
             if (field.type === 'graphic') {
