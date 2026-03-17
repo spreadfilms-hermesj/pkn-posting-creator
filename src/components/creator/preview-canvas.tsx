@@ -49,7 +49,7 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
   const mainPreview = getMainPreviewScale()
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 pb-24">
+    <div className="flex-1 overflow-y-auto p-6 pb-40">
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="mb-6 flex items-center justify-between">
@@ -87,7 +87,7 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
         </div>
 
         {/* Main Preview */}
-        <div className="relative flex justify-center items-center" style={{ minHeight: '620px' }}>
+        <div className="relative flex justify-center items-start" style={{ minHeight: `${mainPreview.height + 32}px` }}>
           <div className="absolute -inset-4 bg-gradient-to-r from-cyan-500/20 to-blue-500/20 rounded-3xl blur-xl" />
           <div
             className="relative rounded-2xl border-2 border-cyan-500/50 overflow-hidden shadow-2xl"
