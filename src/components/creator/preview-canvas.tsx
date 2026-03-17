@@ -1,7 +1,7 @@
 'use client'
 
 import React from 'react'
-import type { PostingConfig, Format } from '@/types/posting'
+import type { PostingConfig, Format, AIImportData } from '@/types/posting'
 import { FORMAT_DIMENSIONS } from '@/types/posting'
 import { PostingGraphic } from './posting-graphic'
 
@@ -10,6 +10,9 @@ interface PreviewCanvasProps {
   updateConfig: (updates: Partial<PostingConfig>) => void
   selectedFieldIndex: number | null
   onSelectField: (i: number) => void
+  variants?: AIImportData[]
+  activeVariantIndex?: number
+  onSwitchVariant?: (i: number) => void
 }
 
 const FORMAT_LABELS: Record<Format, string> = {
@@ -22,7 +25,7 @@ const FORMAT_LABELS: Record<Format, string> = {
 
 const FORMATS: Format[] = ['1:1', '4:3', '3:4', '16:9', '9:16']
 
-export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSelectField }: PreviewCanvasProps) {
+export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSelectField, variants, activeVariantIndex, onSwitchVariant }: PreviewCanvasProps) {
   const getMainPreviewScale = () => {
     const dims = config.aiImport
       ? { width: config.aiImport.artboardWidth, height: config.aiImport.artboardHeight }
@@ -103,34 +106,63 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
           </div>
         </div>
 
-        {/* Mini Previews — hidden in AI import mode */}
-        <div className={`mt-8 flex gap-4 justify-center flex-wrap ${config.aiImport ? 'hidden' : ''}`}>
-          {FORMATS.map((format) => {
-            const mini = getMiniScale(format)
-            const { width: fw, height: fh } = FORMAT_DIMENSIONS[format]
-            return (
-              <div key={format} className="flex flex-col items-center gap-1">
-                <p className="text-xs text-gray-400">{format}</p>
-                <div
-                  className="relative rounded border border-white/10 overflow-hidden cursor-pointer hover:border-cyan-500/50 transition-all"
-                  style={{ width: mini.width, height: mini.height }}
-                  onClick={() => updateConfig({ format })}
-                >
+        {/* Mini Previews — format thumbnails in normal mode */}
+        {!config.aiImport && (
+          <div className="mt-8 flex gap-4 justify-center flex-wrap">
+            {FORMATS.map((format) => {
+              const mini = getMiniScale(format)
+              const { width: fw, height: fh } = FORMAT_DIMENSIONS[format]
+              return (
+                <div key={format} className="flex flex-col items-center gap-1">
+                  <p className="text-xs text-gray-400">{format}</p>
                   <div
-                    style={{
-                      transform: `scale(${mini.scale})`,
-                      transformOrigin: 'top left',
-                      width: fw,
-                      height: fh,
-                    }}
+                    className="relative rounded border border-white/10 overflow-hidden cursor-pointer hover:border-cyan-500/50 transition-all"
+                    style={{ width: mini.width, height: mini.height }}
+                    onClick={() => updateConfig({ format })}
                   >
-                    <PostingGraphic config={{ ...config, format }} />
+                    <div
+                      style={{
+                        transform: `scale(${mini.scale})`,
+                        transformOrigin: 'top left',
+                        width: fw,
+                        height: fh,
+                      }}
+                    >
+                      <PostingGraphic config={{ ...config, format }} />
+                    </div>
                   </div>
                 </div>
-              </div>
-            )
-          })}
-        </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* AI Import variant switcher — inline below canvas, same style as mini previews */}
+        {config.aiImport && variants && variants.length > 1 && (
+          <div className="mt-8 flex gap-4 justify-center flex-wrap">
+            {variants.map((v, i) => {
+              const thumbW = 80
+              const thumbH = Math.round(thumbW * v.artboardHeight / Math.max(v.artboardWidth, 1))
+              const isActive = i === activeVariantIndex
+              return (
+                <div key={i} className="flex flex-col items-center gap-1">
+                  <p className={`text-xs truncate max-w-[90px] text-center ${isActive ? 'text-cyan-400' : 'text-gray-400'}`}>{v.artboardName}</p>
+                  <div
+                    className={`relative rounded border overflow-hidden cursor-pointer transition-all ${
+                      isActive ? 'border-cyan-400 shadow-lg shadow-cyan-500/30' : 'border-white/10 hover:border-cyan-500/50'
+                    }`}
+                    style={{ width: thumbW, height: thumbH }}
+                    onClick={() => onSwitchVariant?.(i)}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={v.backgroundImageUrl} alt={v.artboardName} className="w-full h-full object-cover" />
+                  </div>
+                  <p className="text-[10px] text-gray-500">{v.artboardWidth}×{v.artboardHeight}</p>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/*
