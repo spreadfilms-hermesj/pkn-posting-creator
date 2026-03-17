@@ -2,13 +2,28 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Sparkles, Archive, X, FileCode2 } from 'lucide-react'
-import type { PostingConfig } from '@/types/posting'
+import type { PostingConfig, Format } from '@/types/posting'
 import { defaultConfig } from '@/types/posting'
 import { CreatorSidebar } from '@/components/creator/creator-sidebar'
 import { PreviewCanvas } from '@/components/creator/preview-canvas'
 import { ExportBar } from '@/components/creator/export-bar'
 import { AIImportDialog } from '@/components/creator/ai-import-dialog'
 
+
+const FORMAT_RATIOS: [Format, number][] = [
+  ['1:1', 1],
+  ['4:3', 4 / 3],
+  ['3:4', 3 / 4],
+  ['16:9', 16 / 9],
+  ['9:16', 9 / 16],
+]
+
+function detectFormat(width: number, height: number): Format {
+  const ratio = width / height
+  return FORMAT_RATIOS.reduce((best, [fmt, r]) =>
+    Math.abs(r - ratio) < Math.abs(FORMAT_RATIOS.find(([f]) => f === best)![1] - ratio) ? fmt : best
+  , FORMAT_RATIOS[0][0])
+}
 
 export default function CreatorPage() {
   const [config, setConfig] = useState<PostingConfig>(defaultConfig)
@@ -148,9 +163,11 @@ export default function CreatorPage() {
               activeVariantIndex={config.aiImportVariants?.activeVariantIndex}
               onSwitchVariant={(i) => {
                 const vars = config.aiImportVariants!
+                const v = vars.variants[i]
                 updateConfig({
-                  aiImport: vars.variants[i],
+                  aiImport: v,
                   aiImportVariants: { ...vars, activeVariantIndex: i },
+                  format: detectFormat(v.artboardWidth, v.artboardHeight),
                 })
               }}
             />
@@ -168,6 +185,7 @@ export default function CreatorPage() {
             updateConfig({
               aiImport: variants[0],
               aiImportVariants: variants.length > 1 ? { variants, activeVariantIndex: 0 } : null,
+              format: detectFormat(variants[0].artboardWidth, variants[0].artboardHeight),
             })
             setShowAIImport(false)
           }}
