@@ -19,11 +19,28 @@ const FORMAT_LABELS: Record<Format, string> = {
   '1:1': '1080 × 1080 px',
   '4:3': '1200 × 900 px',
   '3:4': '900 × 1200 px',
-  '16:9': '1200 × 675 px',
+  '4:5': '1080 × 1350 px',
+  '16:9': '1920 × 1080 px',
   '9:16': '1080 × 1920 px',
 }
 
-const FORMATS: Format[] = ['1:1', '4:3', '3:4', '16:9', '9:16']
+const FORMATS: Format[] = ['1:1', '4:3', '3:4', '4:5', '16:9', '9:16']
+
+const FORMAT_ASPECT_RATIOS: [Format, number][] = [
+  ['1:1', 1],
+  ['4:3', 4 / 3],
+  ['3:4', 3 / 4],
+  ['4:5', 4 / 5],
+  ['16:9', 16 / 9],
+  ['9:16', 9 / 16],
+]
+
+function detectFormat(width: number, height: number): Format {
+  const ratio = width / height
+  return FORMAT_ASPECT_RATIOS.reduce((best, [fmt, r]) =>
+    Math.abs(r - ratio) < Math.abs(FORMAT_ASPECT_RATIOS.find(([f]) => f === best)![1] - ratio) ? fmt : best
+  , FORMAT_ASPECT_RATIOS[0][0])
+}
 
 export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSelectField, variants, activeVariantIndex, onSwitchVariant }: PreviewCanvasProps) {
   const getMainPreviewScale = () => {
@@ -48,6 +65,29 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
 
   const mainPreview = getMainPreviewScale()
 
+  // In AI import mode: map each format to the variant index with the closest matching ratio.
+  // Only formats that have a matching variant are shown; clicking them switches the variant.
+  const variantFormatMap = React.useMemo<Map<Format, number>>(() => {
+    const map = new Map<Format, number>()
+    if (!config.aiImport || !variants) return map
+    variants.forEach((v, i) => {
+      const fmt = detectFormat(v.artboardWidth, v.artboardHeight)
+      if (!map.has(fmt)) map.set(fmt, i) // first match wins
+    })
+    return map
+  }, [config.aiImport, variants])
+
+  const visibleFormats = config.aiImport ? FORMATS.filter(f => variantFormatMap.has(f)) : FORMATS
+
+  const handleFormatClick = (format: Format) => {
+    if (config.aiImport && onSwitchVariant) {
+      const idx = variantFormatMap.get(format)
+      if (idx !== undefined) onSwitchVariant(idx)
+    } else {
+      updateConfig({ format })
+    }
+  }
+
   return (
     <div className="flex-1 overflow-y-auto p-6 pb-40">
       <div className="max-w-4xl mx-auto">
@@ -68,10 +108,10 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
             )}
           </div>
           <div className="flex gap-2">
-            {FORMATS.map((format) => (
+            {visibleFormats.map((format) => (
               <button
                 key={format}
-                onClick={() => updateConfig({ format })}
+                onClick={() => handleFormatClick(format)}
                 className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
                   config.format === format
                     ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/50'
@@ -107,7 +147,7 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
         {/* Mini Previews — format thumbnails in normal mode */}
         {!config.aiImport && (
           <div className="mt-8 flex gap-4 justify-center flex-wrap">
-            {FORMATS.map((format) => {
+            {visibleFormats.map((format) => {
               const mini = getMiniScale(format)
               const { width: fw, height: fh } = FORMAT_DIMENSIONS[format]
               return (
@@ -116,7 +156,7 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
                   <div
                     className="relative rounded border border-white/10 overflow-hidden cursor-pointer hover:border-cyan-500/50 transition-all"
                     style={{ width: mini.width, height: mini.height }}
-                    onClick={() => updateConfig({ format })}
+                    onClick={() => handleFormatClick(format)}
                   >
                     <div
                       style={{

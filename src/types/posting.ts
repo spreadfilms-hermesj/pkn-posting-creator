@@ -59,7 +59,7 @@ export type PostType =
   | 'presentation'
   | 'carousel'
 
-export type Format = '1:1' | '4:3' | '3:4' | '16:9' | '9:16'
+export type Format = '1:1' | '4:3' | '3:4' | '4:5' | '16:9' | '9:16'
 
 export interface CarouselSlide {
   id: string
@@ -172,6 +172,7 @@ export const FORMAT_DIMENSIONS: Record<Format, { width: number; height: number }
   '1:1': { width: 1080, height: 1080 },
   '4:3': { width: 1200, height: 900 },
   '3:4': { width: 900, height: 1200 },
-  '16:9': { width: 1200, height: 675 },
+  '4:5': { width: 1080, height: 1350 },
+  '16:9': { width: 1920, height: 1080 },
   '9:16': { width: 1080, height: 1920 },
 }
