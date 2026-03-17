@@ -67,23 +67,21 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
               </>
             )}
           </div>
-          {!config.aiImport && (
-            <div className="flex gap-2">
-              {FORMATS.map((format) => (
-                <button
-                  key={format}
-                  onClick={() => updateConfig({ format })}
-                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                    config.format === format
-                      ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/50'
-                      : 'bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white'
-                  }`}
-                >
-                  {format}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="flex gap-2">
+            {FORMATS.map((format) => (
+              <button
+                key={format}
+                onClick={() => updateConfig({ format })}
+                className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                  config.format === format
+                    ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/50'
+                    : 'bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white'
+                }`}
+              >
+                {format}
+              </button>
+            ))}
+          </div>
         </div>
 
         {/* Main Preview */}
