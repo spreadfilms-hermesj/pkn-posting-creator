@@ -2,6 +2,7 @@ export interface AIEditableField {
   type: 'text' | 'graphic'
   layerName: string      // e.g. "Headline" (the * or ! is stripped)
   isImageSlot?: boolean  // true for !-prefixed layers (editable image placeholder)
+  isDecorativeLayer?: boolean  // true for #-prefixed layers — rendered on canvas, hidden in sidebar
   // text fields
   value: string
   originalText: string

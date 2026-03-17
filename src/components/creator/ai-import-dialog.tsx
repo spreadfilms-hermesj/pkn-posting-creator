@@ -319,7 +319,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
       // content per-page, so including all */!-prefixed OCGs is always correct.
       const effectiveOCGs = allOCGs.filter(g => {
         const name = g.name.trimStart()
-        return name.startsWith('*') || name.startsWith('!')
+        return name.startsWith('*') || name.startsWith('!') || name.startsWith('#')
       })
 
       console.log('[AI Import] Container marker:', containerOCG ? `"${containerOCG.name}" (${containerOCGId})` : 'none (flat structure)')
@@ -722,17 +722,25 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
           // Try OCG-specific text items first, then fall back to positional block
           let block: RichItem[] | null = null
+          let textClusters: RichItem[][] | null = null
           const ocgItems = ocgTextMap.get(ocgId) ?? null
           if (ocgItems && ocgItems.length > 0) {
-            block = clusterItems(ocgItems).flat()
+            textClusters = clusterItems(ocgItems)
+            block = textClusters.flat()
           } else if (fallbackBlocks[ti]) {
             block = fallbackBlocks[ti]
           }
 
           if (!block || block.length === 0) continue
 
-          const sorted = [...block].sort((a, b) => a.vx - b.vx)
-          const text = sorted.map(it => it.str).join(' ').trim()
+          // Build text with line breaks preserved between clusters.
+          // Each cluster = one visual line; sort items within each line left-to-right.
+          const text = textClusters
+            ? textClusters
+                .map(cluster => [...cluster].sort((a, b) => a.vx - b.vx).map(it => it.str).join('').trim())
+                .filter(Boolean)
+                .join('\n')
+            : [...block].sort((a, b) => a.vx - b.vx).map(it => it.str).join(' ').trim()
           const topVy = Math.min(...block.map(it => it.vy - it.fontSize))
           const bottomVy = Math.max(...block.map(it => it.vy))
           const minVx = Math.min(...block.map(it => it.vx))
@@ -768,8 +776,9 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
         // ── Process graphic OCGs ──────────────────────────────────────────
         for (const { id: ocgId, name: ocgRawName, isOCG: ocgIsRegistered } of graphicStarredOCGs) {
-          const layerName = ocgRawName.replace(/^\s*[*!]/, '').trim()
+          const layerName = ocgRawName.replace(/^\s*[*!#]/, '').trim()
           const isImageSlot = ocgRawName.trimStart().startsWith('!')
+          const isDecorativeLayer = ocgRawName.trimStart().startsWith('#')
           console.log(`[AI Import] Isolated layer render: "${layerName}" (${ocgId})`)
 
           // Render this OCG in complete isolation: hide ALL other OCGs, show only this one.
@@ -814,7 +823,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           if (!imageUrl) continue
 
           extractedFields.push({
-            type: 'graphic', layerName, isImageSlot, value: '', originalText: '',
+            type: 'graphic', layerName, isImageSlot, isDecorativeLayer, value: '', originalText: '',
             imageUrl,
             // Full artboard position — the PNG is transparent everywhere except this layer
             x: 0, y: 0, width: 1, height: 1,
@@ -826,7 +835,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         // Reorder extractedFields to match Illustrator layer order (sortedEffectiveOCGs)
         const layerOrder = new Map<string, number>()
         sortedEffectiveOCGs.forEach((ocg, i) => {
-          layerOrder.set(ocg.name.replace(/^\s*[*!]/, '').trim(), i)
+          layerOrder.set(ocg.name.replace(/^\s*[*!#]/, '').trim(), i)
         })
         extractedFields.sort((a, b) => (layerOrder.get(a.layerName) ?? 999) - (layerOrder.get(b.layerName) ?? 999))
       }
