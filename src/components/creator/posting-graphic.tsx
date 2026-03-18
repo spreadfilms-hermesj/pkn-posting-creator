@@ -96,7 +96,7 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
                     ...sharedStyle,
                     width: w,
                     height: h,
-                    transformOrigin: 'top left',
+                    transformOrigin: 'center',
                     transform: field.scale !== 1 ? `scale(${field.scale})` : undefined,
                   }}
                 >

@@ -142,7 +142,23 @@ function AIFieldItem({
     const reader = new FileReader()
     reader.onload = (ev) => {
       const url = ev.target?.result as string
-      if (url) updateField({ imageUrl: url })
+      if (!url) return
+      // Auto-scale: make the image fill the full artboard height.
+      // With objectFit:contain inside the slot container, the image's rendered
+      // height = min(slotH, slotW / imgAspect). We scale the container so that
+      // the rendered image height equals artboardHeight.
+      const im = new window.Image()
+      im.onload = () => {
+        const sw = field.width * aiImport.artboardWidth
+        const sh = field.height * aiImport.artboardHeight
+        const ia = im.naturalWidth / im.naturalHeight
+        const sa = sw / sh
+        // Rendered image height within the unscaled slot container
+        const renderedH = ia > sa ? sw / ia : sh
+        const autoScale = aiImport.artboardHeight / renderedH
+        updateField({ imageUrl: url, scale: autoScale })
+      }
+      im.src = url
     }
     reader.readAsDataURL(file)
     e.target.value = ''
