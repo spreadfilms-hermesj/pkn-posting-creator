@@ -154,7 +154,7 @@ export default function CreatorPage() {
         {/* Main Layout */}
         <div className="flex h-[calc(100vh-57px)]">
           <CreatorSidebar config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} />
-          <div className="flex-1 min-w-0 overflow-hidden">
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <PreviewCanvas
               config={config}
               updateConfig={updateConfig}
