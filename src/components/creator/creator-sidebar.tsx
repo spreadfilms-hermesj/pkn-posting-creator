@@ -234,29 +234,6 @@ function AIFieldItem({
                     <Upload className="w-3 h-3" />
                     {field.imageUrl ? 'Bild ersetzen' : 'Bild hochladen'}
                   </button>
-                  {field.imageUrl && (
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[10px] text-gray-500 uppercase tracking-wide">Horizontal</span>
-                        <button
-                          onClick={() => updateField({ imageOffsetX: 0 })}
-                          className="text-[10px] text-gray-600 hover:text-cyan-400 transition-colors"
-                          title="Zentrieren"
-                        >
-                          Zentrieren
-                        </button>
-                      </div>
-                      <input
-                        type="range"
-                        min={-2000}
-                        max={2000}
-                        step={1}
-                        value={field.imageOffsetX ?? 0}
-                        onChange={(e) => updateField({ imageOffsetX: parseFloat(e.target.value) })}
-                        className="w-full accent-cyan-500"
-                      />
-                    </div>
-                  )}
                 </>
               )}
               {!field.imageUrl && (

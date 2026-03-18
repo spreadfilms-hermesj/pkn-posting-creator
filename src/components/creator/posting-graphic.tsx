@@ -16,6 +16,50 @@ interface PostingGraphicProps {
 // or for live preview (full CSS gradient text).
 const ExportContext = React.createContext(false)
 
+// Renders an image slot at natural cover-scale, extending beyond slot boundaries.
+// overflow:visible on the parent lets the image bleed out; the Illustrator background
+// layer (z:2) acts as the natural mask outside the transparent hole.
+function ImageSlotRenderer({ src, alt, slotW, slotH, imageOffsetX }: {
+  src: string
+  alt: string
+  slotW: number
+  slotH: number
+  imageOffsetX?: number
+}) {
+  const [naturalSize, setNaturalSize] = React.useState<{ w: number; h: number } | null>(null)
+
+  const coverStyle: React.CSSProperties = React.useMemo(() => {
+    if (!naturalSize) return { width: '100%', height: '100%', objectFit: 'cover', display: 'block', position: 'absolute', top: 0, left: 0 }
+    const { w: nw, h: nh } = naturalSize
+    const s = Math.max(slotW / nw, slotH / nh)
+    const dw = nw * s
+    const dh = nh * s
+    const baseLeft = (slotW - dw) / 2
+    const top = (slotH - dh) / 2
+    return {
+      position: 'absolute',
+      width: dw,
+      height: dh,
+      left: baseLeft + (imageOffsetX ?? 0),
+      top,
+      display: 'block',
+    }
+  }, [naturalSize, slotW, slotH, imageOffsetX])
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt={alt}
+      onLoad={(e) => {
+        const img = e.currentTarget
+        setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
+      }}
+      style={coverStyle}
+    />
+  )
+}
+
 // Deterministic star positions — NO Math.random, same output every call
 function generateStarPositions(count: number) {
   const stars: { top: string; left: string; opacity: number }[] = []
@@ -104,22 +148,22 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
                   }}
                 >
                   {field.imageUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={field.imageUrl}
-                      alt={field.layerName}
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        objectFit: isImageLayer ? 'cover' : 'contain',
-                        display: 'block',
-                        // Horizontal pan: translateX shifts the cover-scaled image
-                        // beyond the slot boundary (visible because overflow:visible above)
-                        transform: isImageLayer && field.imageOffsetX
-                          ? `translateX(${field.imageOffsetX}px)`
-                          : undefined,
-                      }}
-                    />
+                    isImageLayer ? (
+                      <ImageSlotRenderer
+                        src={field.imageUrl}
+                        alt={field.layerName}
+                        slotW={w}
+                        slotH={h}
+                        imageOffsetX={field.imageOffsetX}
+                      />
+                    ) : (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={field.imageUrl}
+                        alt={field.layerName}
+                        style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                      />
+                    )
                   ) : (
                     // Placeholder when graphic extraction failed
                     !forExport && (
