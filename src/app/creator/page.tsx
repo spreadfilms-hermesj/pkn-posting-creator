@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Sparkles, Archive, X, FileCode2 } from 'lucide-react'
-import type { PostingConfig, Format } from '@/types/posting'
+import type { PostingConfig, Format, TemplateGroup } from '@/types/posting'
 import { defaultConfig } from '@/types/posting'
 import { CreatorSidebar } from '@/components/creator/creator-sidebar'
 import { PreviewCanvas } from '@/components/creator/preview-canvas'
@@ -26,10 +26,18 @@ function detectFormat(width: number, height: number): Format {
   , FORMAT_RATIOS[0][0])
 }
 
+// Strip trailing format suffix like _9:16, _16:9, _4:5, _1:1, _4:3, _3:4
+function extractBaseName(artboardName: string): string {
+  return artboardName.replace(/_\d+:\d+$/, '').trim() || artboardName
+}
+
 export default function CreatorPage() {
   const [config, setConfig] = useState<PostingConfig>(defaultConfig)
   const [showAIImport, setShowAIImport] = useState(false)
   const [selectedFieldIndex, setSelectedFieldIndex] = useState<number | null>(null)
+  // Template library — accumulates all AI imports across sessions; lives outside PostingConfig
+  const [templateGroups, setTemplateGroups] = useState<TemplateGroup[]>([])
+  const [templateMode, setTemplateMode] = useState(false)
 
   // ── Global undo history ───────────────────────────────────────────────────
   const configRef = useRef<PostingConfig>(defaultConfig)
@@ -60,6 +68,20 @@ export default function CreatorPage() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
+
+  const switchTemplate = useCallback((baseName: string) => {
+    const group = templateGroups.find(g => g.baseName === baseName)
+    if (!group) return
+    const variants = group.variants
+    updateConfig({
+      aiImport: variants[0],
+      aiImportVariants: variants.length > 1 ? { variants, activeVariantIndex: 0 } : null,
+      format: detectFormat(variants[0].artboardWidth, variants[0].artboardHeight),
+    })
+  }, [templateGroups, updateConfig])
+
+  // Base name of the currently active AI import (used to highlight active template button)
+  const activeTemplateName = config.aiImport ? extractBaseName(config.aiImport.artboardName) : null
 
   return (
     <div className="h-screen bg-[#0a0118] relative overflow-hidden">
@@ -109,43 +131,35 @@ export default function CreatorPage() {
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500">Presets:</span>
                 <button
-                  onClick={() => updateConfig({
-                    ...defaultConfig,
-                    headline: 'IT KOSMOS Conference 2026',
-                    subline: 'Join the Mission to the Future of Technology',
-                  })}
+                  onClick={() => { setTemplateMode(false); updateConfig({ ...defaultConfig, headline: 'IT KOSMOS Conference 2026', subline: 'Join the Mission to the Future of Technology' }) }}
                   className="px-3 py-1.5 rounded-lg text-xs bg-white/10 hover:bg-white/20 text-gray-300 border border-white/10 transition-all"
                 >
                   PKN Standard
                 </button>
                 <button
-                  onClick={() => updateConfig({
-                    ...defaultConfig,
-                    spaceBackgroundEnabled: false,
-                    pillEnabled: false,
-                    ctaMode: 'off',
-                    highlightEnabled: false,
-                    glowIntensity: 'low',
-                    backgroundDensity: 'low',
-                  })}
+                  onClick={() => { setTemplateMode(false); updateConfig({ ...defaultConfig, spaceBackgroundEnabled: false, pillEnabled: false, ctaMode: 'off', highlightEnabled: false, glowIntensity: 'low', backgroundDensity: 'low' }) }}
                   className="px-3 py-1.5 rounded-lg text-xs bg-white/10 hover:bg-white/20 text-gray-300 border border-white/10 transition-all"
                 >
                   Minimal
                 </button>
                 <button
-                  onClick={() => updateConfig({
-                    ...defaultConfig,
-                    postType: 'event',
-                    spaceBackgroundEnabled: true,
-                    backgroundDensity: 'high',
-                    glowIntensity: 'high',
-                    ctaMode: 'primary',
-                    statsMode: 'three',
-                  })}
+                  onClick={() => { setTemplateMode(false); updateConfig({ ...defaultConfig, postType: 'event', spaceBackgroundEnabled: true, backgroundDensity: 'high', glowIntensity: 'high', ctaMode: 'primary', statsMode: 'three' }) }}
                   className="px-3 py-1.5 rounded-lg text-xs bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 transition-all"
                 >
                   Event Strong
                 </button>
+                {templateGroups.length > 0 && (
+                  <button
+                    onClick={() => setTemplateMode(true)}
+                    className={`px-3 py-1.5 rounded-lg text-xs border transition-all ${
+                      templateMode
+                        ? 'bg-violet-500/30 text-violet-200 border-violet-500/50'
+                        : 'bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border-violet-500/30'
+                    }`}
+                  >
+                    Template
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -153,7 +167,15 @@ export default function CreatorPage() {
 
         {/* Main Layout */}
         <div className="flex h-[calc(100vh-57px)]">
-          <CreatorSidebar config={config} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} />
+          <CreatorSidebar
+            config={config}
+            updateConfig={updateConfig}
+            selectedFieldIndex={selectedFieldIndex}
+            templateGroups={templateGroups}
+            templateMode={templateMode}
+            activeTemplateName={activeTemplateName}
+            onSelectTemplate={switchTemplate}
+          />
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <PreviewCanvas
               config={config}
@@ -183,6 +205,14 @@ export default function CreatorPage() {
       {showAIImport && (
         <AIImportDialog
           onImport={(variants) => {
+            const baseName = extractBaseName(variants[0].artboardName)
+            const group: TemplateGroup = { baseName, variants }
+            setTemplateGroups(prev => {
+              const idx = prev.findIndex(g => g.baseName === baseName)
+              if (idx >= 0) { const next = [...prev]; next[idx] = group; return next }
+              return [...prev, group]
+            })
+            setTemplateMode(true)
             updateConfig({
               aiImport: variants[0],
               aiImportVariants: variants.length > 1 ? { variants, activeVariantIndex: 0 } : null,

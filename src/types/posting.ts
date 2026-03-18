@@ -42,6 +42,11 @@ export interface AIImportVariants {
   activeVariantIndex: number
 }
 
+export interface TemplateGroup {
+  baseName: string        // e.g. "01_Posting" (format suffix stripped)
+  variants: AIImportData[] // all artboards for this template
+}
+
 export interface BrandSettings {
   logo: string | null
   logoText: string
