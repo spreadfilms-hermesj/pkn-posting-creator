@@ -152,18 +152,22 @@ function AIFieldItem({
         const artH = aiImport.artboardHeight
         const sw = field.width * artW
         const sh = field.height * artH
-        const ia = im.naturalWidth / im.naturalHeight  // image aspect
-        const sa = sw / sh                             // slot aspect
-        // objectFit:contain renders the image at either:
-        //   ia > sa → width-constrained: renderedW=sw, renderedH=sw/ia
-        //   ia ≤ sa → height-constrained: renderedH=sh, renderedW=sh*ia
-        // Scale so the rendered image (not the letterbox) covers the full artboard.
-        let autoScale: number
-        if (ia > sa) {
-          autoScale = Math.max(artW / sw, ia * artH / sw)
-        } else {
-          autoScale = Math.max(artW / (sh * ia), artH / sh)
-        }
+        // Slot center in artboard px (scale transformOrigin is slot center)
+        const cx = (field.x + field.width / 2) * artW
+        const cy = (field.y + field.height / 2) * artH
+        const ia = im.naturalWidth / im.naturalHeight
+        const sa = sw / sh
+        // objectFit:contain rendered image size within the slot
+        let renderedW: number, renderedH: number
+        if (ia > sa) { renderedW = sw;      renderedH = sw / ia }
+        else         { renderedH = sh;      renderedW = sh * ia }
+        // The rendered image is centered on the slot center.
+        // Scale so that the image reaches all four canvas edges, accounting
+        // for off-center slots (slot center ≠ artboard center).
+        const autoScale = Math.max(
+          2 * Math.max(cx, artW - cx) / renderedW,
+          2 * Math.max(cy, artH - cy) / renderedH,
+        )
         updateField({ imageUrl: url, scale: autoScale })
       }
       im.src = url
