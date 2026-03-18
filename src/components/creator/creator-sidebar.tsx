@@ -361,7 +361,13 @@ function AIFieldItem({
                 )}
               />
               <button
-                onClick={() => setScaleLinked(l => !l)}
+                onClick={() => {
+                  if (scaleLinked) {
+                    // Materialize scaleY so H becomes independent of scale immediately
+                    updateField({ scaleY: field.scale ?? 1 })
+                  }
+                  setScaleLinked(l => !l)
+                }}
                 className={`shrink-0 p-1 rounded transition-colors ${scaleLinked ? 'text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20' : 'text-gray-500 hover:bg-white/10'}`}
                 title={scaleLinked ? 'Proportionen gesperrt' : 'Proportionen entsperrt'}
               >
