@@ -13,7 +13,8 @@ export interface AIEditableField {
   textAlign: 'left' | 'center' | 'right'
   // graphic fields
   imageUrl?: string      // extracted graphic as PNG data URL
-  scale: number          // scale multiplier (1 = original size)
+  scale: number          // horizontal scale multiplier (1 = original size)
+  scaleY?: number        // vertical scale — if undefined, same as scale (proportional)
   imageOffsetX?: number  // horizontal pan offset in artboard px (image slots only, default 0 = centered)
   // shared positioning (normalized 0–1)
   x: number

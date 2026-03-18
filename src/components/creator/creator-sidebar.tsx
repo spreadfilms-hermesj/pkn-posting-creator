@@ -8,7 +8,7 @@ import { BrandToggles } from './brand-toggles'
 import { BrandSettingsComponent } from './brand-settings'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload, Link2, Unlink2 } from 'lucide-react'
 
 interface CreatorSidebarProps {
   config: PostingConfig
@@ -65,6 +65,7 @@ function AIFieldItem({
   aiImportVariants: AIImportVariants | null
 }) {
   const [open, setOpen] = useState(true)
+  const [scaleLinked, setScaleLinked] = useState(true)
   const ref = React.useRef<HTMLDivElement>(null)
   // Track Shift key for spinner-click detection (mouse clicks don't fire onKeyDown)
   const shiftRef = React.useRef(false)
@@ -171,10 +172,10 @@ function AIFieldItem({
 
       const thisLayerName = field.layerName
 
-      // Update active variant's field
+      // Update active variant's field (auto-scale is always proportional)
       const activeScale = computeScale(field, aiImport.artboardWidth, aiImport.artboardHeight, ia)
       const updatedActiveFields = aiImport.editableFields.map((f, fi) =>
-        fi === index ? { ...f, imageUrl: url, scale: activeScale } : f
+        fi === index ? { ...f, imageUrl: url, scale: activeScale, scaleY: activeScale } : f
       )
       const updatedAiImport = { ...aiImport, editableFields: updatedActiveFields }
 
@@ -191,7 +192,7 @@ function AIFieldItem({
           editableFields: v.editableFields.map(f2 => {
             if (!f2.isImageSlot || f2.layerName !== thisLayerName) return f2
             const variantScale = computeScale(f2, v.artboardWidth, v.artboardHeight, ia)
-            return { ...f2, imageUrl: url, scale: variantScale }
+            return { ...f2, imageUrl: url, scale: variantScale, scaleY: variantScale }
           }),
         }
       })
@@ -327,21 +328,7 @@ function AIFieldItem({
                 0.1, 1, -200, 200
               )}
             />
-            {field.type === 'graphic' ? (
-              <>
-                <span className="shrink-0">×</span>
-                <input
-                  type="number" min={0.1} max={5} step={0.05}
-                  value={Math.round((field.scale ?? 1) * 100) / 100}
-                  className="w-14 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
-                  {...numericProps(
-                    () => field.scale ?? 1,
-                    (v) => updateField({ scale: v }),
-                    0.05, 1, 0.1, 5
-                  )}
-                />
-              </>
-            ) : (
+            {field.type === 'graphic' ? null : (
               <>
                 <span className="shrink-0">px</span>
                 <input
@@ -359,6 +346,40 @@ function AIFieldItem({
               </>
             )}
           </div>
+          {/* Scale row — graphic layers only */}
+          {field.type === 'graphic' && (
+            <div className="flex items-center gap-2 text-xs text-gray-400">
+              <span className="w-3 text-right shrink-0">W</span>
+              <input
+                type="number" min={0.1} max={10} step={0.05}
+                value={Math.round((field.scale ?? 1) * 100) / 100}
+                className="w-16 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
+                {...numericProps(
+                  () => field.scale ?? 1,
+                  (v) => updateField(scaleLinked ? { scale: v, scaleY: v } : { scale: v }),
+                  0.05, 0.5, 0.1, 10
+                )}
+              />
+              <button
+                onClick={() => setScaleLinked(l => !l)}
+                className={`shrink-0 p-1 rounded transition-colors ${scaleLinked ? 'text-cyan-400 bg-cyan-500/10 hover:bg-cyan-500/20' : 'text-gray-500 hover:bg-white/10'}`}
+                title={scaleLinked ? 'Proportionen gesperrt' : 'Proportionen entsperrt'}
+              >
+                {scaleLinked ? <Link2 className="w-3 h-3" /> : <Unlink2 className="w-3 h-3" />}
+              </button>
+              <span className="w-3 text-right shrink-0">H</span>
+              <input
+                type="number" min={0.1} max={10} step={0.05}
+                value={Math.round((field.scaleY ?? field.scale ?? 1) * 100) / 100}
+                className="w-16 px-1.5 py-1 bg-black/40 border border-white/10 text-cyan-300 rounded text-xs focus:outline-none focus:border-cyan-500 tabular-nums"
+                {...numericProps(
+                  () => field.scaleY ?? field.scale ?? 1,
+                  (v) => updateField(scaleLinked ? { scale: v, scaleY: v } : { scaleY: v }),
+                  0.05, 0.5, 0.1, 10
+                )}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>

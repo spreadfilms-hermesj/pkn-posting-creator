@@ -71,10 +71,11 @@ async function captureAIVariant(variant: AIImportData, fontFamily: string): Prom
     let dw, dh
     if (ia > sa) { dw = fw; dh = fw / ia }   // wider than slot → scale by width
     else         { dh = fh; dw = fh * ia }   // taller than slot → scale by height
-    // Apply field.scale from content center anchor (matches CSS transformOrigin)
-    const scale = field.scale ?? 1
-    const sdw = dw * scale
-    const sdh = dh * scale
+    // Apply field.scale / scaleY from content center anchor (matches CSS transformOrigin)
+    const sx = field.scale ?? 1
+    const sy = field.scaleY ?? sx
+    const sdw = dw * sx
+    const sdh = dh * sy
     const cx = (field.contentCenterX ?? 0.5) * W
     const cy = (field.contentCenterY ?? 0.5) * H
     ctx.drawImage(img, cx - sdw / 2, cy - sdh / 2, sdw, sdh)
@@ -99,11 +100,13 @@ async function captureAIVariant(variant: AIImportData, fontFamily: string): Prom
     if (field.type === 'graphic') {
       if (!field.imageUrl) { ctx.restore(); continue }
       const img = await loadImage(field.imageUrl)
-      if (field.scale !== 1) {
+      const sx = field.scale ?? 1
+      const sy = field.scaleY ?? sx
+      if (sx !== 1 || sy !== 1) {
         const cx = (field.contentCenterX ?? 0.5) * W
         const cy = (field.contentCenterY ?? 0.5) * H
         ctx.translate(cx, cy)
-        ctx.scale(field.scale, field.scale)
+        ctx.scale(sx, sy)
         ctx.translate(-cx, -cy)
       }
       // Full-artboard transparent PNG — always drawn at canvas dimensions

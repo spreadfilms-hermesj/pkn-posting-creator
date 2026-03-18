@@ -91,6 +91,8 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
               // Anchor at the visual content center (detected from non-transparent pixel bbox during import)
               const anchorX = (field.contentCenterX ?? 0.5) * artboardWidth
               const anchorY = (field.contentCenterY ?? 0.5) * artboardHeight
+              const sx = field.scale ?? 1
+              const sy = field.scaleY ?? sx
               return (
                 <div
                   key={i}
@@ -100,7 +102,7 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
                     width: w,
                     height: h,
                     transformOrigin: `${anchorX}px ${anchorY}px`,
-                    transform: field.scale !== 1 ? `scale(${field.scale})` : undefined,
+                    transform: (sx !== 1 || sy !== 1) ? `scale(${sx}, ${sy})` : undefined,
                   }}
                 >
                   {field.imageUrl ? (
