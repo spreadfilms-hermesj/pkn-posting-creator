@@ -143,22 +143,9 @@ function AIFieldItem({
     reader.onload = (ev) => {
       const url = ev.target?.result as string
       if (!url) return
-      // Auto-scale: cover the full canvas in both dimensions.
-      // Compute objectFit:contain rendered size within the slot, then take
-      // the larger of scaleH / scaleW so the image fills the whole artboard.
-      const im = new window.Image()
-      im.onload = () => {
-        const sw = field.width * aiImport.artboardWidth
-        const sh = field.height * aiImport.artboardHeight
-        const ia = im.naturalWidth / im.naturalHeight
-        const sa = sw / sh
-        let renderedH
-        if (ia > sa) { renderedH = sw / ia }
-        else         { renderedH = sh }
-        const scaleH = aiImport.artboardHeight / renderedH
-        updateField({ imageUrl: url, scale: scaleH })
-      }
-      im.src = url
+      // Image renders at full artboard dimensions centered on the slot center
+      // (objectFit:cover at canvas level), so scale:1 always fills the canvas.
+      updateField({ imageUrl: url, scale: 1 })
     }
     reader.readAsDataURL(file)
     e.target.value = ''
