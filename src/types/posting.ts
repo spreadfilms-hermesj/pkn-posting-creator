@@ -22,6 +22,9 @@ export interface AIEditableField {
   height: number
   // shared appearance
   opacity: number        // 0–1, default 1
+  // transform anchor (normalized 0–1 canvas coords) — center of visible content within the full-artboard PNG
+  contentCenterX?: number  // default 0.5
+  contentCenterY?: number  // default 0.5
 }
 
 export interface AIImportData {

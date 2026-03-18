@@ -88,6 +88,9 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
             }
 
             if (field.type === 'graphic') {
+              // Anchor at the visual content center (detected from non-transparent pixel bbox during import)
+              const anchorX = (field.contentCenterX ?? 0.5) * artboardWidth
+              const anchorY = (field.contentCenterY ?? 0.5) * artboardHeight
               return (
                 <div
                   key={i}
@@ -96,7 +99,7 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
                     ...sharedStyle,
                     width: w,
                     height: h,
-                    transformOrigin: 'center',
+                    transformOrigin: `${anchorX}px ${anchorY}px`,
                     transform: field.scale !== 1 ? `scale(${field.scale})` : undefined,
                   }}
                 >

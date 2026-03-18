@@ -787,6 +787,8 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
           // The result is a full-artboard PNG (transparent where this layer has no content)
           // that stacks correctly on top of the background at position (0, 0).
           let imageUrl: string | undefined
+          let contentCenterX = 0.5
+          let contentCenterY = 0.5
 
           try {
             const isolateCfg = await pdf.getOptionalContentConfig()
@@ -807,11 +809,25 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
               background: 'transparent',
             }).promise
 
-            // Check that the layer actually rendered something
+            // Check that the layer actually rendered something, and compute content bounding box
             const layerData = layerCtx.getImageData(0, 0, artW_px, artH_px).data
             let hasContent = false
-            for (let i = 3; i < layerData.length; i += 4) {
-              if (layerData[i] > 16) { hasContent = true; break }
+            let minX = artW_px, maxX = 0, minY = artH_px, maxY = 0
+            for (let py = 0; py < artH_px; py++) {
+              for (let px2 = 0; px2 < artW_px; px2++) {
+                if (layerData[(py * artW_px + px2) * 4 + 3] > 16) {
+                  hasContent = true
+                  if (px2 < minX) minX = px2
+                  if (px2 > maxX) maxX = px2
+                  if (py < minY) minY = py
+                  if (py > maxY) maxY = py
+                }
+              }
+            }
+            // Normalized content center (0–1) — used as transform anchor for scaling
+            if (hasContent) {
+              contentCenterX = (minX + maxX) / 2 / artW_px
+              contentCenterY = (minY + maxY) / 2 / artH_px
             }
             if (hasContent) {
               imageUrl = layerCanvas.toDataURL('image/png')
@@ -828,6 +844,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
             // Full artboard position — the PNG is transparent everywhere except this layer
             x: 0, y: 0, width: 1, height: 1,
             scale: 1, opacity: 1,
+            contentCenterX, contentCenterY,
             fontSize: 0, color: '#ffffff', fontWeight: 400, fontStyle: 'normal', textAlign: 'left',
           })
         }

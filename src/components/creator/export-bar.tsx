@@ -71,12 +71,12 @@ async function captureAIVariant(variant: AIImportData, fontFamily: string): Prom
     let dw, dh
     if (ia > sa) { dw = fw; dh = fw / ia }   // wider than slot → scale by width
     else         { dh = fh; dw = fh * ia }   // taller than slot → scale by height
-    // Apply field.scale from slot center (matches CSS transformOrigin:center)
+    // Apply field.scale from content center anchor (matches CSS transformOrigin)
     const scale = field.scale ?? 1
     const sdw = dw * scale
     const sdh = dh * scale
-    const cx = left + fw / 2
-    const cy = top + fh / 2
+    const cx = (field.contentCenterX ?? 0.5) * W
+    const cy = (field.contentCenterY ?? 0.5) * H
     ctx.drawImage(img, cx - sdw / 2, cy - sdh / 2, sdw, sdh)
     ctx.restore()
   }
@@ -100,8 +100,8 @@ async function captureAIVariant(variant: AIImportData, fontFamily: string): Prom
       if (!field.imageUrl) { ctx.restore(); continue }
       const img = await loadImage(field.imageUrl)
       if (field.scale !== 1) {
-        const cx = left + fw / 2
-        const cy = top + (field.height * H) / 2
+        const cx = (field.contentCenterX ?? 0.5) * W
+        const cy = (field.contentCenterY ?? 0.5) * H
         ctx.translate(cx, cy)
         ctx.scale(field.scale, field.scale)
         ctx.translate(-cx, -cy)
