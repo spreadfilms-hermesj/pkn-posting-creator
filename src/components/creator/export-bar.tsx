@@ -65,13 +65,13 @@ async function captureAIVariant(variant: AIImportData, fontFamily: string): Prom
     ctx.save()
     ctx.globalAlpha = field.opacity ?? 1
     const img = await loadImage(field.imageUrl)
-    // Cover-scale: fill slot (CSS objectFit:cover), then apply field.scale
-    // from slot center (matches CSS transformOrigin:center)
+    // Contain-scale: fit whole image within slot (CSS objectFit:contain)
     const ia = img.width / img.height
     const sa = fw / fh
     let dw, dh
-    if (ia > sa) { dh = fh; dw = fh * ia }   // wider than slot → scale by height
-    else         { dw = fw; dh = fw / ia }   // taller than slot → scale by width
+    if (ia > sa) { dw = fw; dh = fw / ia }   // wider than slot → scale by width
+    else         { dh = fh; dw = fh * ia }   // taller than slot → scale by height
+    // Apply field.scale from slot center (matches CSS transformOrigin:center)
     const scale = field.scale ?? 1
     const sdw = dw * scale
     const sdh = dh * scale

@@ -105,7 +105,7 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
                     <img
                       src={field.imageUrl}
                       alt={field.layerName}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                      style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
                     />
                   ) : (
                     // Placeholder when graphic extraction failed
