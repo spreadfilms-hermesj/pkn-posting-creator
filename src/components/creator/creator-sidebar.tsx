@@ -149,31 +149,57 @@ function AIFieldItem({
     })
     const bitmapPromise = createImageBitmap(file)
 
+    // Compute auto-scale for a given slot field and artboard dimensions.
+    const computeScale = (f: AIEditableField, artW: number, artH: number, ia: number): number => {
+      const sw = f.width * artW
+      const sh = f.height * artH
+      const sa = sw / sh
+      let renderedW: number, renderedH: number
+      if (ia > sa) { renderedW = sw; renderedH = sw / ia }
+      else         { renderedH = sh; renderedW = sh * ia }
+      const cx = (f.x + f.width  / 2) * artW
+      const cy = (f.y + f.height / 2) * artH
+      const scaleH = 2 * Math.max(cy, artH - cy) / renderedH
+      const scaleW = 2 * Math.max(cx, artW - cx) / renderedW
+      return Math.max(scaleH, scaleW)
+    }
+
     Promise.all([urlPromise, bitmapPromise]).then(([url, bitmap]) => {
       if (!url) return
       const ia = bitmap.width / bitmap.height
       bitmap.close()
 
-      const artW = aiImport.artboardWidth
-      const artH = aiImport.artboardHeight
-      const sw = field.width * artW
-      const sh = field.height * artH
-      const sa = sw / sh
+      const thisLayerName = field.layerName
 
-      // objectFit:contain rendered image size within the slot
-      let renderedW: number, renderedH: number
-      if (ia > sa) { renderedW = sw;      renderedH = sw / ia }
-      else         { renderedH = sh;      renderedW = sh * ia }
+      // Update active variant's field
+      const activeScale = computeScale(field, aiImport.artboardWidth, aiImport.artboardHeight, ia)
+      const updatedActiveFields = aiImport.editableFields.map((f, fi) =>
+        fi === index ? { ...f, imageUrl: url, scale: activeScale } : f
+      )
+      const updatedAiImport = { ...aiImport, editableFields: updatedActiveFields }
 
-      // Slot center in artboard px
-      const cx = (field.x + field.width  / 2) * artW
-      const cy = (field.y + field.height / 2) * artH
+      if (!aiImportVariants) {
+        updateConfig({ aiImport: updatedAiImport })
+        return
+      }
 
-      // Scale so the rendered image covers all four canvas edges,
-      // accounting for off-center slot positions.
-      const scaleH = 2 * Math.max(cy, artH - cy) / renderedH
-      const scaleW = 2 * Math.max(cx, artW - cx) / renderedW
-      updateField({ imageUrl: url, scale: Math.max(scaleH, scaleW) })
+      // Update all other variants — compute per-variant scale using each artboard's dimensions
+      const syncedVariants = aiImportVariants.variants.map((v, vi) => {
+        if (vi === aiImportVariants.activeVariantIndex) return updatedAiImport
+        return {
+          ...v,
+          editableFields: v.editableFields.map(f2 => {
+            if (!f2.isImageSlot || f2.layerName !== thisLayerName) return f2
+            const variantScale = computeScale(f2, v.artboardWidth, v.artboardHeight, ia)
+            return { ...f2, imageUrl: url, scale: variantScale }
+          }),
+        }
+      })
+
+      updateConfig({
+        aiImport: updatedAiImport,
+        aiImportVariants: { ...aiImportVariants, variants: syncedVariants },
+      })
     }).catch(() => {
       // Fallback: set image without auto-scale
       urlPromise.then((url) => { if (url) updateField({ imageUrl: url, scale: 1 }) })
