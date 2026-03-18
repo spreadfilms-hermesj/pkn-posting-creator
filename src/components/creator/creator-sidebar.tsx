@@ -112,6 +112,27 @@ function AIFieldItem({
       return
     }
 
+    // Sync image uploads to matching image-slot layers in all other variants
+    if ('imageUrl' in updates && field.isImageSlot && aiImportVariants && updates.imageUrl !== undefined) {
+      const thisLayerName = field.layerName
+      const syncedVariants = aiImportVariants.variants.map((v, vi) => {
+        if (vi === aiImportVariants.activeVariantIndex) return updatedAiImport
+        return {
+          ...v,
+          editableFields: v.editableFields.map(f2 =>
+            f2.isImageSlot && f2.layerName === thisLayerName
+              ? { ...f2, imageUrl: updates.imageUrl! }
+              : f2
+          ),
+        }
+      })
+      updateConfig({
+        aiImport: updatedAiImport,
+        aiImportVariants: { ...aiImportVariants, variants: syncedVariants },
+      })
+      return
+    }
+
     updateConfig({ aiImport: updatedAiImport })
   }
 
