@@ -472,21 +472,23 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
         {/* AI Import — shown when an AI file has been imported */}
         {config.aiImport && (
           <div className="bg-cyan-500/10 border border-cyan-500/30 rounded-2xl overflow-hidden">
-            <div className="px-6 py-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <FileCode2 className="w-4 h-4 text-cyan-400" />
-                <span className="text-base font-semibold text-white">AI Import</span>
-                <span className="text-xs bg-cyan-500/30 text-cyan-300 px-2 py-0.5 rounded-full">
-                  {config.aiImport.artboardName}
-                </span>
+            {!templateMode && (
+              <div className="px-6 py-4 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <FileCode2 className="w-4 h-4 text-cyan-400" />
+                  <span className="text-base font-semibold text-white">AI Import</span>
+                  <span className="text-xs bg-cyan-500/30 text-cyan-300 px-2 py-0.5 rounded-full">
+                    {config.aiImport.artboardName}
+                  </span>
+                </div>
+                <button
+                  onClick={() => updateConfig({ aiImport: null, aiImportVariants: null })}
+                  className="text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg border border-red-500/20 transition-all"
+                >
+                  Entfernen
+                </button>
               </div>
-              <button
-                onClick={() => updateConfig({ aiImport: null, aiImportVariants: null })}
-                className="text-xs text-red-400 hover:text-red-300 bg-red-500/10 hover:bg-red-500/20 px-3 py-1.5 rounded-lg border border-red-500/20 transition-all"
-              >
-                Entfernen
-              </button>
-            </div>
+            )}
             <AIFieldList fields={config.aiImport.editableFields} aiImport={config.aiImport} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} aiImportVariants={config.aiImportVariants ?? null} />
 
           </div>
