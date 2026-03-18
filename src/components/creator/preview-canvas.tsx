@@ -211,6 +211,20 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
       */}
       {FORMATS.map((format) => {
         const { width, height } = FORMAT_DIMENSIONS[format]
+
+        // In AI import mode, each export container must use the matching variant's
+        // aiImport data — not the currently active one — so every format renders
+        // its own artboard content at the correct dimensions.
+        let exportConfig = { ...config, format }
+        if (config.aiImport && config.aiImportVariants) {
+          const variantIdx = variantFormatMap.get(format)
+          if (variantIdx === undefined) return null // no artboard for this format, skip
+          const variantData = variantIdx === config.aiImportVariants.activeVariantIndex
+            ? config.aiImport  // currently active: has user edits
+            : config.aiImportVariants.variants[variantIdx]  // other variants: original data
+          exportConfig = { ...config, format, aiImport: variantData }
+        }
+
         return (
           <div
             key={format}
@@ -228,7 +242,7 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
               zIndex: -9999,
             }}
           >
-            <PostingGraphic config={{ ...config, format }} forExport={true} />
+            <PostingGraphic config={exportConfig} forExport={true} />
           </div>
         )
       })}
