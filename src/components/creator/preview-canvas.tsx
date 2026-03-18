@@ -193,7 +193,7 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
                     onClick={() => onSwitchVariant?.(i)}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={v.backgroundImageUrl} alt={v.artboardName} className="w-full h-full object-cover" />
+                    <img src={v.thumbnailUrl ?? v.backgroundImageUrl} alt={v.artboardName} className="w-full h-full object-cover" />
                   </div>
                   <p className="text-[10px] text-gray-500">{v.artboardWidth}×{v.artboardHeight}</p>
                 </div>

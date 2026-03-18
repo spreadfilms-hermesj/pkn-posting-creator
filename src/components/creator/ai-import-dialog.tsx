@@ -889,8 +889,36 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
         bgCtx.putImageData(bgImgData, 0, 0)
       }
 
+      // ── Build composite thumbnail (background + all graphic layers) ──────────
+      // backgroundImageUrl hides editable layers, so thumbnails look empty.
+      // We composite bg + graphic imageUrls to get a proper preview.
+      let thumbnailUrl: string | undefined
+      try {
+        const compCanvas = document.createElement('canvas')
+        compCanvas.width = artW_px
+        compCanvas.height = artH_px
+        const compCtx = compCanvas.getContext('2d')!
+        compCtx.drawImage(bgCanvas, 0, 0)
+        // Draw graphic fields bottom-to-top (highest index = lowest z-order)
+        for (let fi = extractedFields.length - 1; fi >= 0; fi--) {
+          const field = extractedFields[fi]
+          if (field.type !== 'graphic' || !field.imageUrl) continue
+          const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+            const im = new Image()
+            im.onload = () => resolve(im)
+            im.onerror = reject
+            im.src = field.imageUrl!
+          })
+          compCtx.drawImage(img, 0, 0, artW_px, artH_px)
+        }
+        thumbnailUrl = compCanvas.toDataURL('image/png')
+      } catch (e) {
+        console.warn('[AI Import] Composite thumbnail failed, falling back to bg:', e)
+      }
+
       return {
         backgroundImageUrl: bgCanvas.toDataURL('image/png'),
+        thumbnailUrl,
         artboardWidth: artboard.width,
         artboardHeight: artboard.height,
         artboardName: containerOCG
@@ -1003,7 +1031,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
   const activeVariant = processedVariants[activePreviewIndex] ?? null
   const fields = activeVariant?.editableFields ?? []
-  const backgroundUrl = activeVariant?.backgroundImageUrl ?? ''
+  const backgroundUrl = activeVariant?.thumbnailUrl ?? activeVariant?.backgroundImageUrl ?? ''
   const hasAnyChange = processedVariants.some(v =>
     v.editableFields.some(f => f.type === 'text' && f.value !== f.originalText)
   )

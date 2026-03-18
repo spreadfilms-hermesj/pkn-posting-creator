@@ -25,6 +25,7 @@ export interface AIEditableField {
 
 export interface AIImportData {
   backgroundImageUrl: string  // artboard rendered without * layers
+  thumbnailUrl?: string       // composite of background + all graphic layers (for variant switcher)
   artboardWidth: number
   artboardHeight: number
   artboardName: string
