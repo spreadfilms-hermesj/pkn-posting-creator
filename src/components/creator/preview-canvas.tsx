@@ -182,7 +182,7 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
   const isZoomed = zoom !== 1 || pan.x !== 0 || pan.y !== 0
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 pb-40">
+    <div className="flex-1 overflow-y-auto p-6 pb-64">
       <div className="max-w-4xl mx-auto">
 
         {/* Header */}
@@ -314,9 +314,13 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
         {config.aiImport && variants && variants.length > 1 && (
           <div className="mt-2 flex gap-4 justify-center flex-wrap">
             {variants.map((v, i) => {
-              const thumbW = 80
-              const thumbH = Math.round(thumbW * v.artboardHeight / Math.max(v.artboardWidth, 1))
+              const maxSz = 80
+              const thumbScale = Math.min(maxSz / v.artboardWidth, maxSz / v.artboardHeight)
+              const thumbW = Math.round(v.artboardWidth * thumbScale)
+              const thumbH = Math.round(v.artboardHeight * thumbScale)
               const isActive = i === activeVariantIndex
+              // Use live config.aiImport for active variant so edits are reflected immediately
+              const variantConfig = { ...config, aiImport: isActive ? config.aiImport! : v }
               return (
                 <div key={i} className="flex flex-col items-center gap-1">
                   <p className={`text-xs truncate max-w-[90px] text-center ${isActive ? 'text-cyan-400' : 'text-gray-400'}`}>{v.artboardName}</p>
@@ -327,8 +331,9 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
                     style={{ width: thumbW, height: thumbH }}
                     onClick={() => onSwitchVariant?.(i)}
                   >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={v.thumbnailUrl ?? v.backgroundImageUrl} alt={v.artboardName} className="w-full h-full object-cover" />
+                    <div style={{ transform: `scale(${thumbScale})`, transformOrigin: 'top left', width: v.artboardWidth, height: v.artboardHeight, pointerEvents: 'none' }}>
+                      <PostingGraphic config={variantConfig} />
+                    </div>
                   </div>
                   <p className="text-[10px] text-gray-500">{v.artboardWidth}×{v.artboardHeight}</p>
                 </div>
