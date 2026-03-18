@@ -16,61 +16,6 @@ interface PostingGraphicProps {
 // or for live preview (full CSS gradient text).
 const ExportContext = React.createContext(false)
 
-// Renders an image slot at natural cover-scale, extending beyond slot boundaries.
-// overflow:visible on the parent lets the image bleed out; the Illustrator background
-// layer (z:2) acts as the natural mask outside the transparent hole.
-function ImageSlotRenderer({ src, alt, slotW, slotH, imageOffsetX }: {
-  src: string
-  alt: string
-  slotW: number
-  slotH: number
-  imageOffsetX?: number
-}) {
-  const [dims, setDims] = React.useState<{ w: number; h: number } | null>(null)
-  const imgRef = React.useRef<HTMLImageElement>(null)
-
-  const applyDims = React.useCallback((img: HTMLImageElement) => {
-    if (img.naturalWidth > 0) setDims({ w: img.naturalWidth, h: img.naturalHeight })
-  }, [])
-
-  // When src changes: reset dims, then immediately check if already cached
-  // (onLoad doesn't re-fire for cached images when component mounts fresh)
-  React.useEffect(() => {
-    setDims(null)
-    const img = imgRef.current
-    if (img?.complete) applyDims(img)
-  }, [src, applyDims])
-
-  const style: React.CSSProperties = React.useMemo(() => {
-    if (!dims) {
-      // Fallback until natural dimensions are known
-      return { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }
-    }
-    const s = Math.max(slotW / dims.w, slotH / dims.h)
-    const dw = dims.w * s
-    const dh = dims.h * s
-    return {
-      position: 'absolute',
-      display: 'block',
-      width: dw,
-      height: dh,
-      left: (slotW - dw) / 2 + (imageOffsetX ?? 0),
-      top: (slotH - dh) / 2,
-      objectFit: 'cover',
-    }
-  }, [dims, slotW, slotH, imageOffsetX])
-
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      ref={imgRef}
-      src={src}
-      alt={alt}
-      onLoad={(e) => applyDims(e.currentTarget)}
-      style={style}
-    />
-  )
-}
 
 // Deterministic star positions — NO Math.random, same output every call
 function generateStarPositions(count: number) {
@@ -153,29 +98,15 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
                     height: h,
                     transformOrigin: 'top left',
                     transform: field.scale !== 1 ? `scale(${field.scale})` : undefined,
-                    // Image slots must NOT clip — the Illustrator background layer (z:2)
-                    // is opaque outside the transparent hole and acts as the natural mask.
-                    // overflow:visible lets the user pan the image left/right freely.
-                    overflow: isImageLayer ? 'visible' : undefined,
                   }}
                 >
                   {field.imageUrl ? (
-                    isImageLayer ? (
-                      <ImageSlotRenderer
-                        src={field.imageUrl}
-                        alt={field.layerName}
-                        slotW={w}
-                        slotH={h}
-                        imageOffsetX={field.imageOffsetX}
-                      />
-                    ) : (
-                      // eslint-disable-next-line @next/next/no-img-element
-                      <img
-                        src={field.imageUrl}
-                        alt={field.layerName}
-                        style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
-                      />
-                    )
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={field.imageUrl}
+                      alt={field.layerName}
+                      style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+                    />
                   ) : (
                     // Placeholder when graphic extraction failed
                     !forExport && (
