@@ -2,12 +2,17 @@
 
 import React, { useState, useRef, useCallback } from 'react'
 import { Upload, X, ChevronRight, Loader2, FileCheck, AlertCircle, RotateCcw } from 'lucide-react'
-import type { AIImportData, AIEditableField } from '@/types/posting'
+import type { AIImportData, AIEditableField, TemplateGroup } from '@/types/posting'
 import { Label } from '@/components/ui/label'
 
 interface AIImportDialogProps {
-  onImport: (variants: AIImportData[]) => void
+  onImport: (groups: TemplateGroup[]) => void
   onClose: () => void
+}
+
+// Strip trailing format suffix like _9:16, _16:9, _4:5, _1:1, _4:3, _3:4
+function extractBaseName(name: string): string {
+  return name.replace(/_\d+:\d+$/, '').trim() || name
 }
 
 type Step = 'upload' | 'artboards' | 'fields'
@@ -982,7 +987,15 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
 
   const handleImport = () => {
     if (processedVariants.length === 0) return
-    onImport(processedVariants)
+    // Group variants by base name (strips _9:16 / _16:9 etc.) → each group = one Post Type
+    const groupMap = new Map<string, AIImportData[]>()
+    for (const v of processedVariants) {
+      const base = extractBaseName(v.artboardName)
+      if (!groupMap.has(base)) groupMap.set(base, [])
+      groupMap.get(base)!.push(v)
+    }
+    const groups: TemplateGroup[] = Array.from(groupMap.entries()).map(([baseName, variants]) => ({ baseName, variants }))
+    onImport(groups)
   }
 
   // ── Event handlers ────────────────────────────────────────────────────────
@@ -1239,11 +1252,21 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                   )}
 
                   {/* Cross-artboard sync hint */}
-                  {processedVariants.length > 1 && (
-                    <p className="text-xs text-cyan-400/70 bg-cyan-500/5 border border-cyan-500/20 rounded-lg px-3 py-2">
-                      Text-Änderungen werden automatisch auf alle {processedVariants.length} Artboards übertragen.
-                    </p>
-                  )}
+                  {processedVariants.length > 1 && (() => {
+                    const groups = new Map<string, number>()
+                    for (const v of processedVariants) {
+                      const base = extractBaseName(v.artboardName)
+                      groups.set(base, (groups.get(base) ?? 0) + 1)
+                    }
+                    const postTypeCount = groups.size
+                    return (
+                      <p className="text-xs text-cyan-400/70 bg-cyan-500/5 border border-cyan-500/20 rounded-lg px-3 py-2">
+                        {postTypeCount > 1
+                          ? `${postTypeCount} Post Types erkannt (${Array.from(groups.keys()).join(', ')}) — werden beim Import als separate Templates gespeichert.`
+                          : `Text-Änderungen werden automatisch auf alle ${processedVariants.length} Formate übertragen.`}
+                      </p>
+                    )
+                  })()}
 
                   {fields.length === 0 ? (
                     <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-4 text-sm text-yellow-300 space-y-1">

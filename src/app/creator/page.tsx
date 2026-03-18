@@ -204,15 +204,20 @@ export default function CreatorPage() {
       {/* AI Import Dialog */}
       {showAIImport && (
         <AIImportDialog
-          onImport={(variants) => {
-            const baseName = extractBaseName(variants[0].artboardName)
-            const group: TemplateGroup = { baseName, variants }
+          onImport={(incomingGroups) => {
+            // Merge all incoming groups into the template hub (upsert by baseName)
             setTemplateGroups(prev => {
-              const idx = prev.findIndex(g => g.baseName === baseName)
-              if (idx >= 0) { const next = [...prev]; next[idx] = group; return next }
-              return [...prev, group]
+              let next = [...prev]
+              for (const group of incomingGroups) {
+                const idx = next.findIndex(g => g.baseName === group.baseName)
+                if (idx >= 0) { next[idx] = group } else { next = [...next, group] }
+              }
+              return next
             })
             setTemplateMode(true)
+            // Activate the first group's first variant
+            const first = incomingGroups[0]
+            const variants = first.variants
             updateConfig({
               aiImport: variants[0],
               aiImportVariants: variants.length > 1 ? { variants, activeVariantIndex: 0 } : null,
