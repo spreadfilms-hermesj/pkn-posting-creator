@@ -143,20 +143,21 @@ function AIFieldItem({
     reader.onload = (ev) => {
       const url = ev.target?.result as string
       if (!url) return
-      // Auto-scale: make the image fill the full artboard height.
-      // With objectFit:contain inside the slot container, the image's rendered
-      // height = min(slotH, slotW / imgAspect). We scale the container so that
-      // the rendered image height equals artboardHeight.
+      // Auto-scale: cover the full canvas in both dimensions.
+      // Compute objectFit:contain rendered size within the slot, then take
+      // the larger of scaleH / scaleW so the image fills the whole artboard.
       const im = new window.Image()
       im.onload = () => {
         const sw = field.width * aiImport.artboardWidth
         const sh = field.height * aiImport.artboardHeight
         const ia = im.naturalWidth / im.naturalHeight
         const sa = sw / sh
-        // Rendered image height within the unscaled slot container
-        const renderedH = ia > sa ? sw / ia : sh
-        const autoScale = aiImport.artboardHeight / renderedH
-        updateField({ imageUrl: url, scale: autoScale })
+        let renderedW, renderedH
+        if (ia > sa) { renderedW = sw; renderedH = sw / ia }
+        else         { renderedH = sh; renderedW = sh * ia }
+        const scaleH = aiImport.artboardHeight / renderedH
+        const scaleW = aiImport.artboardWidth / renderedW
+        updateField({ imageUrl: url, scale: Math.max(scaleH, scaleW) })
       }
       im.src = url
     }
