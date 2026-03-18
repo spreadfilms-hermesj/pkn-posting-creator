@@ -54,6 +54,8 @@ async function captureAIVariant(variant: AIImportData, fontFamily: string): Prom
   }))
 
   // Pass 1: image-slot layers (z=1, sit below the background image)
+  // NO clipping — the background layer (pass 2) is opaque outside the slot hole
+  // and acts as the natural mask, matching the CSS overflow:visible behaviour.
   for (const { field } of fieldsWithZ.filter(f => f.z === 1)) {
     if (!field.imageUrl) continue
     const left = field.x * W
@@ -63,15 +65,15 @@ async function captureAIVariant(variant: AIImportData, fontFamily: string): Prom
     ctx.save()
     ctx.globalAlpha = field.opacity ?? 1
     const img = await loadImage(field.imageUrl)
-    // objectFit: cover
+    // Cover-scale: fill the slot height, maintain aspect ratio (same as CSS objectFit:cover)
     const ia = img.width / img.height
     const sa = fw / fh
-    let dx = left, dy = top, dw = fw, dh = fh
-    if (ia > sa) { dh = fh; dw = fh * ia; dx = left - (dw - fw) / 2 }
-    else { dw = fw; dh = fw / ia; dy = top - (dh - fh) / 2 }
-    ctx.beginPath()
-    ctx.rect(left, top, fw, fh)
-    ctx.clip()
+    let dw, dh
+    if (ia > sa) { dh = fh; dw = fh * ia }   // wider than slot → scale by height
+    else         { dw = fw; dh = fw / ia }    // taller than slot → scale by width
+    // Center then apply imageOffsetX (same as CSS translateX on the cover-scaled image)
+    const dx = left + (fw - dw) / 2 + (field.imageOffsetX ?? 0)
+    const dy = top  + (fh - dh) / 2
     ctx.drawImage(img, dx, dy, dw, dh)
     ctx.restore()
   }

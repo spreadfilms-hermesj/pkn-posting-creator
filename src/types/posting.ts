@@ -14,6 +14,7 @@ export interface AIEditableField {
   // graphic fields
   imageUrl?: string      // extracted graphic as PNG data URL
   scale: number          // scale multiplier (1 = original size)
+  imageOffsetX?: number  // horizontal pan offset in artboard px (image slots only, default 0 = centered)
   // shared positioning (normalized 0–1)
   x: number
   y: number

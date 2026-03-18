@@ -97,11 +97,29 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
                     height: h,
                     transformOrigin: 'top left',
                     transform: field.scale !== 1 ? `scale(${field.scale})` : undefined,
+                    // Image slots must NOT clip — the Illustrator background layer (z:2)
+                    // is opaque outside the transparent hole and acts as the natural mask.
+                    // overflow:visible lets the user pan the image left/right freely.
+                    overflow: isImageLayer ? 'visible' : undefined,
                   }}
                 >
                   {field.imageUrl ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={field.imageUrl} alt={field.layerName} style={{ width: '100%', height: '100%', objectFit: isImageLayer ? 'cover' : 'contain', display: 'block' }} />
+                    <img
+                      src={field.imageUrl}
+                      alt={field.layerName}
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: isImageLayer ? 'cover' : 'contain',
+                        display: 'block',
+                        // Horizontal pan: translateX shifts the cover-scaled image
+                        // beyond the slot boundary (visible because overflow:visible above)
+                        transform: isImageLayer && field.imageOffsetX
+                          ? `translateX(${field.imageOffsetX}px)`
+                          : undefined,
+                      }}
+                    />
                   ) : (
                     // Placeholder when graphic extraction failed
                     !forExport && (
