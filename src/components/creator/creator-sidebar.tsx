@@ -152,12 +152,11 @@ function AIFieldItem({
         const sh = field.height * aiImport.artboardHeight
         const ia = im.naturalWidth / im.naturalHeight
         const sa = sw / sh
-        let renderedW, renderedH
-        if (ia > sa) { renderedW = sw; renderedH = sw / ia }
-        else         { renderedH = sh; renderedW = sh * ia }
+        let renderedH
+        if (ia > sa) { renderedH = sw / ia }
+        else         { renderedH = sh }
         const scaleH = aiImport.artboardHeight / renderedH
-        const scaleW = aiImport.artboardWidth / renderedW
-        updateField({ imageUrl: url, scale: Math.max(scaleH, scaleW) })
+        updateField({ imageUrl: url, scale: scaleH })
       }
       im.src = url
     }
