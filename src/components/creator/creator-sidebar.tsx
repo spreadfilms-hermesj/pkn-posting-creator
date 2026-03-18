@@ -148,27 +148,15 @@ function AIFieldItem({
       // the larger of scaleH / scaleW so the image fills the whole artboard.
       const im = new window.Image()
       im.onload = () => {
-        const artW = aiImport.artboardWidth
         const artH = aiImport.artboardHeight
-        const sw = field.width * artW
+        const sw = field.width * aiImport.artboardWidth
         const sh = field.height * artH
-        // Slot center in artboard px (scale transformOrigin is slot center)
-        const cx = (field.x + field.width / 2) * artW
-        const cy = (field.y + field.height / 2) * artH
         const ia = im.naturalWidth / im.naturalHeight
         const sa = sw / sh
-        // objectFit:contain rendered image size within the slot
-        let renderedW: number, renderedH: number
-        if (ia > sa) { renderedW = sw;      renderedH = sw / ia }
-        else         { renderedH = sh;      renderedW = sh * ia }
-        // The rendered image is centered on the slot center.
-        // Scale so that the image reaches all four canvas edges, accounting
-        // for off-center slots (slot center ≠ artboard center).
-        const autoScale = Math.max(
-          2 * Math.max(cx, artW - cx) / renderedW,
-          2 * Math.max(cy, artH - cy) / renderedH,
-        )
-        updateField({ imageUrl: url, scale: autoScale })
+        // objectFit:contain rendered height within the slot
+        const renderedH = ia > sa ? sw / ia : sh
+        // Scale so the rendered image fills the full canvas height
+        updateField({ imageUrl: url, scale: artH / renderedH })
       }
       im.src = url
     }
