@@ -98,7 +98,6 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
                     height: h,
                     transformOrigin: 'center',
                     transform: field.scale !== 1 ? `scale(${field.scale})` : undefined,
-                    overflow: isImageLayer ? 'visible' : undefined,
                   }}
                 >
                   {field.imageUrl ? (
@@ -106,18 +105,7 @@ export function PostingGraphic({ config, forExport = false, selectedFieldIndex, 
                     <img
                       src={field.imageUrl}
                       alt={field.layerName}
-                      style={{
-                        position: 'absolute',
-                        // Center the artboard-sized image on the slot center.
-                        // Extends beyond the slot container in all directions;
-                        // the Illustrator background (z:2) acts as the mask.
-                        left: -(artboardWidth - w) / 2,
-                        top: -(artboardHeight - h) / 2,
-                        width: artboardWidth,
-                        height: artboardHeight,
-                        objectFit: 'cover',
-                        display: 'block',
-                      }}
+                      style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
                     />
                   ) : (
                     // Placeholder when graphic extraction failed
