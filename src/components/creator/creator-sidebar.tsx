@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef } from 'react'
 import type { PostingConfig, TemplateGroup } from '@/types/posting'
+import { defaultConfig } from '@/types/posting'
+import { PostingGraphic } from './posting-graphic'
 import { MediaUploader } from './media-uploader'
 import { PostTypeSelector } from './post-type-selector'
 import { BrandToggles } from './brand-toggles'
@@ -53,14 +55,16 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 
 import type { AIImportData, AIEditableField, AIImportVariants } from '@/types/posting'
 
-// Pick the thumbnail of the variant closest to 16:9
-function getBestThumbnail(variants: AIImportData[]): string {
-  const sorted = [...variants].sort((a, b) =>
+// Pick the variant closest to 16:9 aspect ratio
+function getBestVariant(variants: AIImportData[]): AIImportData {
+  return [...variants].sort((a, b) =>
     Math.abs(a.artboardWidth / a.artboardHeight - 16 / 9) -
     Math.abs(b.artboardWidth / b.artboardHeight - 16 / 9)
-  )
-  return sorted[0].thumbnailUrl ?? sorted[0].backgroundImageUrl
+  )[0]
 }
+
+// Sidebar card width: 400px sidebar - 2×16px padding - 12px gap, divided by 2 columns
+const THUMB_W = 178
 
 function AIFieldItem({
   field,
@@ -473,7 +477,15 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
               <div className="px-4 pb-4 grid grid-cols-2 gap-3">
                 {templateGroups.map(g => {
                   const isActive = activeTemplateName === g.baseName
-                  const thumb = getBestThumbnail(g.variants)
+                  const bestVariant = getBestVariant(g.variants)
+                  const artW = bestVariant.artboardWidth
+                  const artH = bestVariant.artboardHeight
+                  const thumbScale = THUMB_W / artW
+                  const thumbH = Math.round(artH * thumbScale)
+                  // For the active template use live config (reflects current edits);
+                  // for others use stored variant data
+                  const thumbAiImport = isActive ? (config.aiImport ?? bestVariant) : bestVariant
+                  const thumbConfig = { ...defaultConfig, aiImport: thumbAiImport, aiImportVariants: null }
                   return (
                     <button
                       key={g.baseName}
@@ -484,9 +496,10 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                           : 'border-white/10 hover:border-violet-400/50 bg-white/5 hover:bg-white/10'
                       }`}
                     >
-                      <div className="w-full aspect-video bg-black/40 overflow-hidden">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={thumb} alt={g.baseName} className="w-full h-full object-cover" />
+                      <div style={{ width: THUMB_W, height: thumbH, overflow: 'hidden', position: 'relative' }}>
+                        <div style={{ transform: `scale(${thumbScale})`, transformOrigin: 'top left', width: artW, height: artH, pointerEvents: 'none' }}>
+                          <PostingGraphic config={thumbConfig} />
+                        </div>
                       </div>
                       <div className="px-2 py-2">
                         <p className={`text-xs font-semibold truncate ${isActive ? 'text-violet-200' : 'text-gray-300'}`}>{g.baseName}</p>
