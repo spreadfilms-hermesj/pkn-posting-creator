@@ -139,17 +139,46 @@ function AIFieldItem({
   const handleImageReplace = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
-    const reader = new FileReader()
-    reader.onload = (ev) => {
-      const url = ev.target?.result as string
+
+    // Read data URL and measure image dimensions in parallel.
+    // createImageBitmap is a reliable Promise-based API — no onload timing issues.
+    const urlPromise = new Promise<string>((resolve) => {
+      const reader = new FileReader()
+      reader.onload = (ev) => resolve(ev.target?.result as string ?? '')
+      reader.readAsDataURL(file)
+    })
+    const bitmapPromise = createImageBitmap(file)
+
+    Promise.all([urlPromise, bitmapPromise]).then(([url, bitmap]) => {
       if (!url) return
-      // Scale the slot so it fills the full canvas height.
-      // field.height is normalized 0-1, so 1/field.height scales the slot
-      // height to exactly the artboard height. Synchronous — no image loading.
-      const autoScale = field.height > 0 ? 1 / field.height : 1
-      updateField({ imageUrl: url, scale: autoScale })
-    }
-    reader.readAsDataURL(file)
+      const ia = bitmap.width / bitmap.height
+      bitmap.close()
+
+      const artW = aiImport.artboardWidth
+      const artH = aiImport.artboardHeight
+      const sw = field.width * artW
+      const sh = field.height * artH
+      const sa = sw / sh
+
+      // objectFit:contain rendered image size within the slot
+      let renderedW: number, renderedH: number
+      if (ia > sa) { renderedW = sw;      renderedH = sw / ia }
+      else         { renderedH = sh;      renderedW = sh * ia }
+
+      // Slot center in artboard px
+      const cx = (field.x + field.width  / 2) * artW
+      const cy = (field.y + field.height / 2) * artH
+
+      // Scale so the rendered image covers all four canvas edges,
+      // accounting for off-center slot positions.
+      const scaleH = 2 * Math.max(cy, artH - cy) / renderedH
+      const scaleW = 2 * Math.max(cx, artW - cx) / renderedW
+      updateField({ imageUrl: url, scale: Math.max(scaleH, scaleW) })
+    }).catch(() => {
+      // Fallback: set image without auto-scale
+      urlPromise.then((url) => { if (url) updateField({ imageUrl: url, scale: 1 }) })
+    })
+
     e.target.value = ''
   }
 
