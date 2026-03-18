@@ -115,8 +115,9 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp) }
   }, [dragging])
 
-  // Wheel zoom — non-passive so we can preventDefault (stops page scroll)
+  // Wheel zoom — only when Option (Alt) key is held; plain scroll passes through
   const handleWheel = React.useCallback((e: WheelEvent) => {
+    if (!e.altKey) return
     e.preventDefault()
     const vp = viewportRef.current
     if (!vp) return
@@ -283,7 +284,7 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
 
         {/* Hint bar */}
         <p className="text-[10px] text-gray-600 text-right mb-6 select-none">
-          Scroll to zoom · Hold <kbd className="bg-white/10 px-1 rounded">Space</kbd> + drag to pan
+          <kbd className="bg-white/10 px-1 rounded">⌥</kbd> + scroll to zoom · Hold <kbd className="bg-white/10 px-1 rounded">Space</kbd> + drag to pan
         </p>
 
         {/* Mini Previews — normal mode */}
@@ -321,9 +322,10 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
               const isActive = i === activeVariantIndex
               // Use live config.aiImport for active variant so edits are reflected immediately
               const variantConfig = { ...config, aiImport: isActive ? config.aiImport! : v }
+              const variantFormat = detectFormat(v.artboardWidth, v.artboardHeight)
               return (
                 <div key={i} className="flex flex-col items-center gap-1">
-                  <p className={`text-xs truncate max-w-[90px] text-center ${isActive ? 'text-cyan-400' : 'text-gray-400'}`}>{v.artboardName}</p>
+                  <p className={`text-xs font-semibold text-center ${isActive ? 'text-cyan-400' : 'text-gray-400'}`}>{variantFormat}</p>
                   <div
                     className={`relative rounded border overflow-hidden cursor-pointer transition-all ${
                       isActive ? 'border-cyan-400 shadow-lg shadow-cyan-500/30' : 'border-white/10 hover:border-cyan-500/50'
