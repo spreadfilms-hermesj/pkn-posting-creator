@@ -1,8 +1,18 @@
 'use client'
 
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import type { PostingConfig, Format } from '@/types/posting'
 import { FORMAT_DIMENSIONS } from '@/types/posting'
+
+const FORMAT_RATIOS: [Format, number][] = [
+  ['1:1', 1], ['4:3', 4 / 3], ['3:4', 3 / 4], ['4:5', 4 / 5], ['16:9', 16 / 9], ['9:16', 9 / 16],
+]
+function detectExportFormat(w: number, h: number): Format {
+  const ratio = w / h
+  return FORMAT_RATIOS.reduce((best, [fmt, r]) =>
+    Math.abs(r - ratio) < Math.abs(FORMAT_RATIOS.find(([f]) => f === best)![1] - ratio) ? fmt : best
+  , FORMAT_RATIOS[0][0])
+}
 import { Download, FileImage, Loader2, LogOut } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -103,6 +113,19 @@ function getFilename(config: PostingConfig, format: Format): string {
 export function ExportBar({ config }: ExportBarProps) {
   const [exporting, setExporting] = useState<string | null>(null)
 
+  // In AI import mode, only show formats that have a matching imported artboard
+  const activeFormats = useMemo<Format[]>(() => {
+    const allFormats: Format[] = ['1:1', '4:3', '3:4', '4:5', '16:9', '9:16']
+    if (!config.aiImportVariants) return allFormats.filter(f => f !== '4:5') // normal mode: all except 4:5
+    const seen = new Set<Format>()
+    const result: Format[] = []
+    for (const v of config.aiImportVariants.variants) {
+      const fmt = detectExportFormat(v.artboardWidth, v.artboardHeight)
+      if (!seen.has(fmt)) { seen.add(fmt); result.push(fmt) }
+    }
+    return result
+  }, [config.aiImportVariants])
+
   const exportSingle = async (format: Format) => {
     if (exporting) return
     setExporting(format)
@@ -124,7 +147,7 @@ export function ExportBar({ config }: ExportBarProps) {
     if (exporting) return
     setExporting('all')
 
-    const formats: Format[] = ['1:1', '4:3', '3:4', '16:9', '9:16']
+    const formats: Format[] = activeFormats
     const exports: { dataUrl: string; filename: string }[] = []
 
     try {
@@ -191,7 +214,7 @@ export function ExportBar({ config }: ExportBarProps) {
 
           <div className="flex items-center gap-2">
             {/* Individual format buttons */}
-            {(['1:1', '4:3', '3:4', '16:9', '9:16'] as const).map((format) => (
+            {activeFormats.map((format) => (
               <button
                 key={format}
                 onClick={() => exportSingle(format)}
