@@ -26,36 +26,48 @@ function ImageSlotRenderer({ src, alt, slotW, slotH, imageOffsetX }: {
   slotH: number
   imageOffsetX?: number
 }) {
-  const [naturalSize, setNaturalSize] = React.useState<{ w: number; h: number } | null>(null)
+  const [dims, setDims] = React.useState<{ w: number; h: number } | null>(null)
+  const imgRef = React.useRef<HTMLImageElement>(null)
 
-  const coverStyle: React.CSSProperties = React.useMemo(() => {
-    if (!naturalSize) return { width: '100%', height: '100%', objectFit: 'cover', display: 'block', position: 'absolute', top: 0, left: 0 }
-    const { w: nw, h: nh } = naturalSize
-    const s = Math.max(slotW / nw, slotH / nh)
-    const dw = nw * s
-    const dh = nh * s
-    const baseLeft = (slotW - dw) / 2
-    const top = (slotH - dh) / 2
+  const applyDims = React.useCallback((img: HTMLImageElement) => {
+    if (img.naturalWidth > 0) setDims({ w: img.naturalWidth, h: img.naturalHeight })
+  }, [])
+
+  // When src changes: reset dims, then immediately check if already cached
+  // (onLoad doesn't re-fire for cached images when component mounts fresh)
+  React.useEffect(() => {
+    setDims(null)
+    const img = imgRef.current
+    if (img?.complete) applyDims(img)
+  }, [src, applyDims])
+
+  const style: React.CSSProperties = React.useMemo(() => {
+    if (!dims) {
+      // Fallback until natural dimensions are known
+      return { position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block' }
+    }
+    const s = Math.max(slotW / dims.w, slotH / dims.h)
+    const dw = dims.w * s
+    const dh = dims.h * s
     return {
       position: 'absolute',
+      display: 'block',
       width: dw,
       height: dh,
-      left: baseLeft + (imageOffsetX ?? 0),
-      top,
-      display: 'block',
+      left: (slotW - dw) / 2 + (imageOffsetX ?? 0),
+      top: (slotH - dh) / 2,
+      objectFit: 'cover',
     }
-  }, [naturalSize, slotW, slotH, imageOffsetX])
+  }, [dims, slotW, slotH, imageOffsetX])
 
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
+      ref={imgRef}
       src={src}
       alt={alt}
-      onLoad={(e) => {
-        const img = e.currentTarget
-        setNaturalSize({ w: img.naturalWidth, h: img.naturalHeight })
-      }}
-      style={coverStyle}
+      onLoad={(e) => applyDims(e.currentTarget)}
+      style={style}
     />
   )
 }
