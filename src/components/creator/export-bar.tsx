@@ -120,8 +120,28 @@ async function captureAIVariant(variant: AIImportData, fontFamily: string): Prom
       const lineHeight = field.fontSize * 1.25
       const halfLeading = field.fontSize * 0.125
 
-      field.value.split('\n').forEach((line, i) => {
-        ctx.fillText(line, textX, top + halfLeading + i * lineHeight, fw)
+      // Manual word-wrap to match CSS whiteSpace:pre-wrap + wordBreak:break-word.
+      // DO NOT pass maxWidth to fillText — that scales/compresses text instead of wrapping.
+      const wrapLine = (raw: string): string[] => {
+        const words = raw.split(' ')
+        const out: string[] = []
+        let cur = ''
+        for (const word of words) {
+          const test = cur ? `${cur} ${word}` : word
+          if (ctx.measureText(test).width > fw && cur) {
+            out.push(cur)
+            cur = word
+          } else {
+            cur = test
+          }
+        }
+        if (cur) out.push(cur)
+        return out.length ? out : ['']
+      }
+
+      const allLines = field.value.split('\n').flatMap(wrapLine)
+      allLines.forEach((line, i) => {
+        ctx.fillText(line, textX, top + halfLeading + i * lineHeight)
       })
     }
 
