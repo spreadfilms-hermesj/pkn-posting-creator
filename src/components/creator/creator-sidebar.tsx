@@ -148,15 +148,23 @@ function AIFieldItem({
       // the larger of scaleH / scaleW so the image fills the whole artboard.
       const im = new window.Image()
       im.onload = () => {
-        const sw = field.width * aiImport.artboardWidth
-        const sh = field.height * aiImport.artboardHeight
-        const ia = im.naturalWidth / im.naturalHeight
-        const sa = sw / sh
-        let renderedH
-        if (ia > sa) { renderedH = sw / ia }
-        else         { renderedH = sh }
-        const scaleH = aiImport.artboardHeight / renderedH
-        updateField({ imageUrl: url, scale: scaleH })
+        const artW = aiImport.artboardWidth
+        const artH = aiImport.artboardHeight
+        const sw = field.width * artW
+        const sh = field.height * artH
+        const ia = im.naturalWidth / im.naturalHeight  // image aspect
+        const sa = sw / sh                             // slot aspect
+        // objectFit:contain renders the image at either:
+        //   ia > sa → width-constrained: renderedW=sw, renderedH=sw/ia
+        //   ia ≤ sa → height-constrained: renderedH=sh, renderedW=sh*ia
+        // Scale so the rendered image (not the letterbox) covers the full artboard.
+        let autoScale: number
+        if (ia > sa) {
+          autoScale = Math.max(artW / sw, ia * artH / sw)
+        } else {
+          autoScale = Math.max(artW / (sh * ia), artH / sh)
+        }
+        updateField({ imageUrl: url, scale: autoScale })
       }
       im.src = url
     }
