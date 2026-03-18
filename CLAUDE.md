@@ -93,15 +93,55 @@ The pdfjs worker is loaded from unpkg CDN: `https://unpkg.com/pdfjs-dist@{versio
 
 **Requirement for users:** `.ai` files must be saved with *Create PDF Compatible File* checked (Illustrator default).
 
+### Multi-Post-Type grouping on import
+Artboards are grouped by base name (stripping `_9:16` / `_16:9` etc. suffix) into `TemplateGroup[]`:
+- `extractBaseName(name)` — regex `/_\d+:\d+$/` strips format suffix
+- `01_Posting_16:9` + `01_Posting_9:16` → one group `"01_Posting"` with two variants
+- `02_Text-Post_16:9` + `02_Text-Post_9:16` → separate group `"02_Text-Post"`
+- Naming convention `01_`, `02_`, `03_`... is fully adaptive — no hardcoding
+- `onImport` in dialog groups `processedVariants` by base name → delivers `TemplateGroup[]`
+- `page.tsx` merges incoming groups into `templateGroups` state (upsert by baseName)
+- Import dialog Step 2 shows a violet "X Post Types erkannt" summary above the artboard grid
+
+### Template Mode (sidebar + page.tsx)
+- `templateGroups: TemplateGroup[]` — state in `page.tsx`, outside `PostingConfig` (not in undo history)
+- `templateMode: boolean` — UI state in `page.tsx`; `true` when Template preset is active
+- `TemplateGroup { baseName: string, variants: AIImportData[] }` — defined in `src/types/posting.ts`
+- `activeTemplateName` — derived from `extractBaseName(config.aiImport.artboardName)`
+- Template button in header preset bar only shown when `templateGroups.length > 0`
+- Other preset buttons call `setTemplateMode(false)` when clicked
+
+**Sidebar in template mode:**
+- "Post auswählen" section: collapsible (ChevronUp/Down), shows 2-column grid of Post Type cards
+- Each card: live `PostingGraphic` thumbnail (16:9-preferred variant, scaled to THUMB_W=178px), name, format count
+- Active card highlighted with violet border
+- AI Import header row ("AI Import / artboard badge / Entfernen button") **hidden** in template mode
+- All normal sections (Brand/CI, Media, Post Type, Content, Brand Controls, Format) **hidden** in template mode
+- Only the AI Import editable fields section stays visible
+- `getBestVariant(variants)` in sidebar — picks variant closest to 16:9 ratio for thumbnail
+- `THUMB_W = 178` — computed from sidebar width 400px minus padding/gap
+
 ### Variant Switcher (preview-canvas.tsx)
 - Shown inline **below the main canvas** when AI import has >1 variant
-- Style matches mini format previews: artboard name + thumbnail + dimensions label
+- Renders live `PostingGraphic` thumbnails (scaled), active variant uses live `config.aiImport`
+- Format label shown (e.g. "16:9") instead of artboard name
 - Active variant highlighted with `border-cyan-400`
-- Thumbnail uses `backgroundImageUrl` of each variant as an `<img>`
 - Clicking calls `onSwitchVariant(i)` which updates `aiImport`, `aiImportVariants`, and `format` in `page.tsx`
+- Zoom: **Option (⌥) + scroll** to zoom in/out; Space + drag to pan
+
+### Graphic layer scale controls (sidebar)
+- `scale: number` — horizontal/width scale (default 1)
+- `scaleY?: number` — vertical/height scale; if undefined, falls back to `scale` (proportional)
+- W + lock button + H inputs in sidebar; lock icon = proportions linked
+- Clicking unlock **materializes** `scaleY = field.scale` immediately so H becomes independent
+- `transformOrigin` uses detected content center (`contentCenterX/Y`) in pixel coords, NOT `'center'`
+- Content center detected at import via pixel bounding box scan of layer PNG
+- Export (canvas): `ctx.translate(cx, cy); ctx.scale(sx, sy); ctx.translate(-cx, -cy)`
 
 ### Export
 `ExportBar` uses `html2canvas` (dynamically imported). It briefly un-hides each fixed export container, pre-measures gradient element widths (because `getBoundingClientRect` returns 0 on hidden elements), then passes those widths into `html2canvas`'s `onclone` callback to fix gradient rendering. All formats can be exported at once as a ZIP via `jszip`.
+
+In AI import mode, export bypasses html2canvas entirely — uses a direct Canvas 2D composition (`captureAIVariant`) that draws background + graphic layers + text at native resolution.
 
 ### Adding a new post type
 1. Add the string literal to the `PostType` union in `src/types/posting.ts`
