@@ -1166,6 +1166,36 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                       </button>
                     )}
                   </div>
+                  {/* Detected Post Types summary */}
+                  {(() => {
+                    const groups = new Map<string, typeof artboards>()
+                    for (const b of artboards) {
+                      const base = extractBaseName(b.name)
+                      if (!groups.has(base)) groups.set(base, [])
+                      groups.get(base)!.push(b)
+                    }
+                    if (groups.size <= 1) return null
+                    return (
+                      <div className="bg-violet-500/10 border border-violet-500/20 rounded-xl px-4 py-3 space-y-2">
+                        <p className="text-xs text-violet-300 font-semibold">{groups.size} Post Types erkannt</p>
+                        <div className="space-y-1">
+                          {Array.from(groups.entries()).map(([name, boards]) => (
+                            <div key={name} className="flex items-center gap-2 text-xs">
+                              <span className="text-violet-400 font-mono font-medium">{name}</span>
+                              <span className="text-gray-500">·</span>
+                              <span className="text-gray-400">{boards.length} Format{boards.length !== 1 ? 'e' : ''}: {boards.map(b => {
+                                const r = b.width / b.height
+                                const fmt = ([[16/9,'16:9'],[9/16,'9:16'],[1,'1:1'],[4/5,'4:5'],[4/3,'4:3'],[3/4,'3:4']] as [number,string][])
+                                  .reduce((best, [rv, name]) => Math.abs(rv - r) < Math.abs(best[0] - r) ? [rv, name] : best)
+                                return fmt[1]
+                              }).join(', ')}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )
+                  })()}
+
                   <div className="grid grid-cols-2 gap-3">
                     {artboards.map((board) => {
                       const isSelected = selectedArtboards.has(board.pageNum)

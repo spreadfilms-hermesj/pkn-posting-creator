@@ -53,6 +53,15 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 
 import type { AIImportData, AIEditableField, AIImportVariants } from '@/types/posting'
 
+// Pick the thumbnail of the variant closest to 16:9
+function getBestThumbnail(variants: AIImportData[]): string {
+  const sorted = [...variants].sort((a, b) =>
+    Math.abs(a.artboardWidth / a.artboardHeight - 16 / 9) -
+    Math.abs(b.artboardWidth / b.artboardHeight - 16 / 9)
+  )
+  return sorted[0].thumbnailUrl ?? sorted[0].backgroundImageUrl
+}
+
 function AIFieldItem({
   field,
   index,
@@ -429,6 +438,7 @@ function AIFieldList({
 
 export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate }: CreatorSidebarProps) {
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
+  const [postSelectorOpen, setPostSelectorOpen] = useState(true)
 
   const toggleSection = (section: string) => {
     setOpenSections((prev) =>
@@ -449,23 +459,44 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
 
           {/* Template post selector — shown in template mode */}
         {templateMode && templateGroups.length > 0 && (
-          <div className="bg-violet-500/10 border border-violet-500/30 rounded-2xl p-4">
-            <p className="text-xs text-violet-400 font-semibold mb-3 uppercase tracking-wide">Post auswählen</p>
-            <div className="flex flex-wrap gap-2">
-              {templateGroups.map(g => (
-                <button
-                  key={g.baseName}
-                  onClick={() => onSelectTemplate?.(g.baseName)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                    activeTemplateName === g.baseName
-                      ? 'bg-violet-500 text-white'
-                      : 'bg-white/10 text-gray-300 hover:bg-white/20'
-                  }`}
-                >
-                  {g.baseName}
-                </button>
-              ))}
-            </div>
+          <div className="bg-violet-500/10 border border-violet-500/30 rounded-2xl overflow-hidden">
+            <button
+              onClick={() => setPostSelectorOpen(o => !o)}
+              className="w-full px-5 py-4 flex items-center justify-between hover:bg-white/5 transition-colors"
+            >
+              <span className="text-sm font-semibold text-violet-300 uppercase tracking-wide">Post auswählen</span>
+              {postSelectorOpen
+                ? <ChevronUp className="w-4 h-4 text-violet-400" />
+                : <ChevronDown className="w-4 h-4 text-violet-400" />}
+            </button>
+            {postSelectorOpen && (
+              <div className="px-4 pb-4 grid grid-cols-2 gap-3">
+                {templateGroups.map(g => {
+                  const isActive = activeTemplateName === g.baseName
+                  const thumb = getBestThumbnail(g.variants)
+                  return (
+                    <button
+                      key={g.baseName}
+                      onClick={() => onSelectTemplate?.(g.baseName)}
+                      className={`rounded-xl overflow-hidden border-2 transition-all text-left ${
+                        isActive
+                          ? 'border-violet-400 bg-violet-500/20'
+                          : 'border-white/10 hover:border-violet-400/50 bg-white/5 hover:bg-white/10'
+                      }`}
+                    >
+                      <div className="w-full aspect-video bg-black/40 overflow-hidden">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={thumb} alt={g.baseName} className="w-full h-full object-cover" />
+                      </div>
+                      <div className="px-2 py-2">
+                        <p className={`text-xs font-semibold truncate ${isActive ? 'text-violet-200' : 'text-gray-300'}`}>{g.baseName}</p>
+                        <p className="text-[10px] text-gray-500 mt-0.5">{g.variants.length} Format{g.variants.length !== 1 ? 'e' : ''}</p>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
 
