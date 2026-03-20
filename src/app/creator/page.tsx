@@ -5,6 +5,7 @@ import { Sparkles, Archive, X } from 'lucide-react'
 import type { PostingConfig, Format, TemplateGroup, ProjectDraft } from '@/types/posting'
 import { defaultConfig } from '@/types/posting'
 import { CreatorSidebar } from '@/components/creator/creator-sidebar'
+import { PostingGraphic } from '@/components/creator/posting-graphic'
 import { PreviewCanvas } from '@/components/creator/preview-canvas'
 import { ExportBar } from '@/components/creator/export-bar'
 import { AIImportDialog } from '@/components/creator/ai-import-dialog'
@@ -44,6 +45,7 @@ export default function CreatorPage() {
   // Project drafts
   const [projectDrafts, setProjectDrafts] = useState<ProjectDraft[]>([])
   const [showSaveDraft, setShowSaveDraft] = useState(false)
+  const [showUserProjects, setShowUserProjects] = useState(false)
   const [draftNameInput, setDraftNameInput] = useState('')
 
   // Load persisted template groups from IndexedDB on mount
@@ -217,7 +219,7 @@ export default function CreatorPage() {
                   Event Strong
                 </button>
                 <button
-                  onClick={() => setTemplateMode(true)}
+                  onClick={() => { setTemplateMode(true); updateConfig({ aiImport: null, aiImportVariants: null }) }}
                   className={`px-3 py-1.5 rounded-lg text-xs border transition-all ${
                     templateMode
                       ? 'bg-violet-500/30 text-violet-200 border-violet-500/50'
@@ -244,9 +246,6 @@ export default function CreatorPage() {
             onOpenAIImport={() => setShowAIImport(true)}
             onRemoveTemplate={removeTemplate}
             onReplaceTemplate={replaceTemplate}
-            projectDrafts={projectDrafts}
-            onLoadDraft={loadDraft}
-            onDeleteDraft={deleteDraft}
           />
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <PreviewCanvas
@@ -275,7 +274,12 @@ export default function CreatorPage() {
         </div>
 
         {/* Export Bar */}
-        <ExportBar config={config} onSaveProject={config.aiImport ? openSaveDraft : undefined} />
+        <ExportBar
+          config={config}
+          onSaveProject={config.aiImport ? openSaveDraft : undefined}
+          onOpenUserProjects={() => setShowUserProjects(v => !v)}
+          userProjectCount={projectDrafts.length}
+        />
       </div>
 
       {/* AI Import Dialog */}
@@ -309,6 +313,60 @@ export default function CreatorPage() {
           }}
           onClose={() => { setShowAIImport(false); setReplacingBaseName(null) }}
         />
+      )}
+
+      {/* User Projects Panel — slides up from export bar */}
+      {showUserProjects && (
+        <div className="fixed bottom-[57px] left-0 right-0 z-40 bg-[#0d0820]/95 backdrop-blur-xl border-t border-white/10 shadow-2xl max-h-[55vh] flex flex-col">
+          <div className="flex items-center justify-between px-6 py-3 border-b border-white/10 shrink-0">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-bold text-white">User Projects</span>
+              <span className="text-[10px] bg-white/10 text-gray-400 px-2 py-0.5 rounded-full">{projectDrafts.length}</span>
+            </div>
+            <button onClick={() => setShowUserProjects(false)} className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 transition-colors">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          {projectDrafts.length === 0 ? (
+            <p className="px-6 py-8 text-sm text-gray-500 text-center">Noch keine gespeicherten Projekte.</p>
+          ) : (
+            <div className="overflow-y-auto px-6 py-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {projectDrafts.map(draft => {
+                const artW = draft.aiImport.artboardWidth
+                const artH = draft.aiImport.artboardHeight
+                const THUMB = 120
+                const thumbScale = THUMB / artW
+                const thumbH = Math.round(artH * thumbScale)
+                const thumbConfig = { ...defaultConfig, aiImport: draft.aiImport, aiImportVariants: null }
+                const dateStr = new Date(draft.createdAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                return (
+                  <div key={draft.id} className="flex flex-col rounded-xl overflow-hidden border border-white/10 bg-white/5 hover:bg-white/10 transition-all group">
+                    <div style={{ width: THUMB, height: thumbH, overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
+                      <div style={{ transform: `scale(${thumbScale})`, transformOrigin: 'top left', width: artW, height: artH, pointerEvents: 'none' }}>
+                        <PostingGraphic config={thumbConfig} />
+                      </div>
+                    </div>
+                    <div className="px-2 py-2 flex-1 flex flex-col gap-1">
+                      <p className="text-xs font-semibold text-gray-200 truncate">{draft.name}</p>
+                      {draft.templateBaseName && <p className="text-[10px] text-gray-500 truncate">{draft.templateBaseName}</p>}
+                      <p className="text-[10px] text-gray-600">{dateStr}</p>
+                      <div className="flex gap-1 mt-1">
+                        <button
+                          onClick={() => { loadDraft(draft); setShowUserProjects(false) }}
+                          className="flex-1 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-300 text-[10px] font-medium border border-cyan-500/30 transition-all"
+                        >Laden</button>
+                        <button
+                          onClick={() => deleteDraft(draft.id)}
+                          className="py-1 px-2 rounded bg-white/5 hover:bg-red-500/20 text-gray-500 hover:text-red-400 text-[10px] border border-white/10 hover:border-red-500/30 transition-all"
+                        ><X className="w-3 h-3" /></button>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Save Draft Dialog */}

@@ -247,9 +247,11 @@ function getFilename(config: PostingConfig, format: Format): string {
 interface ExportBarProps {
   config: PostingConfig
   onSaveProject?: () => void
+  onOpenUserProjects?: () => void
+  userProjectCount?: number
 }
 
-export function ExportBar({ config, onSaveProject }: ExportBarProps) {
+export function ExportBar({ config, onSaveProject, onOpenUserProjects, userProjectCount = 0 }: ExportBarProps) {
   const [exporting, setExporting] = useState<string | null>(null)
 
   // In AI import mode, only show formats matching imported artboards
@@ -357,6 +359,36 @@ export function ExportBar({ config, onSaveProject }: ExportBarProps) {
           </button>
 
           <div className="flex items-center gap-2">
+            {/* Project actions — left of format exports */}
+            {(onSaveProject || onOpenUserProjects) && (
+              <>
+                {onSaveProject && (
+                  <button
+                    onClick={onSaveProject}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 font-semibold text-sm border border-violet-500/30 transition-all"
+                  >
+                    <BookmarkPlus className="w-4 h-4" />
+                    Projekt speichern
+                  </button>
+                )}
+                {onOpenUserProjects && (
+                  <button
+                    onClick={onOpenUserProjects}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-gray-300 font-semibold text-sm border border-white/10 transition-all relative"
+                  >
+                    <FileImage className="w-4 h-4" />
+                    User Projects
+                    {userProjectCount > 0 && (
+                      <span className="absolute -top-1.5 -right-1.5 text-[9px] bg-violet-500 text-white rounded-full w-4 h-4 flex items-center justify-center font-bold">
+                        {userProjectCount > 9 ? '9+' : userProjectCount}
+                      </span>
+                    )}
+                  </button>
+                )}
+                <div className="w-px h-8 bg-white/20 mx-1" />
+              </>
+            )}
+
             {activeFormats.map((format) => (
               <button
                 key={format}
@@ -370,16 +402,6 @@ export function ExportBar({ config, onSaveProject }: ExportBarProps) {
             ))}
 
             <div className="w-px h-8 bg-white/20 mx-1" />
-
-            {onSaveProject && (
-              <button
-                onClick={onSaveProject}
-                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 font-semibold text-sm border border-violet-500/30 transition-all"
-              >
-                <BookmarkPlus className="w-4 h-4" />
-                Projekt speichern
-              </button>
-            )}
 
             <button
               onClick={exportAll}
