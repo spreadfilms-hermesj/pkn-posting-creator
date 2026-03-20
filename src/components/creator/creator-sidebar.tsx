@@ -10,7 +10,7 @@ import { BrandToggles } from './brand-toggles'
 import { BrandSettingsComponent } from './brand-settings'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload, Link2, Unlink2, Settings2, X, RefreshCw, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload, Link2, Unlink2, Settings2, X, RefreshCw, Trash2, RotateCcw } from 'lucide-react'
 
 interface CreatorSidebarProps {
   config: PostingConfig
@@ -76,6 +76,7 @@ function AIFieldItem({
   updateConfig,
   isSelected,
   aiImportVariants,
+  originalField,
 }: {
   field: AIEditableField
   index: number
@@ -83,9 +84,11 @@ function AIFieldItem({
   updateConfig: (updates: Partial<PostingConfig>) => void
   isSelected: boolean
   aiImportVariants: AIImportVariants | null
+  originalField?: AIEditableField
 }) {
   const [open, setOpen] = useState(true)
   const [scaleLinked, setScaleLinked] = useState(true)
+  const [resetToast, setResetToast] = useState(false)
   const ref = React.useRef<HTMLDivElement>(null)
   // Track Shift key for spinner-click detection (mouse clicks don't fire onKeyDown)
   const shiftRef = React.useRef(false)
@@ -105,6 +108,14 @@ function AIFieldItem({
   }, [isSelected])
 
   const imageInputRef = useRef<HTMLInputElement>(null)
+
+  const resetField = () => {
+    if (!originalField) return
+    const { value, x, y, fontSize, color, textAlign, scale, scaleY, opacity } = originalField
+    updateField({ value, x, y, fontSize, color, textAlign, scale, scaleY: scaleY ?? scale, opacity: opacity ?? 1 })
+    setResetToast(true)
+    setTimeout(() => setResetToast(false), 2000)
+  }
 
   const updateField = (updates: Partial<AIEditableField>) => {
     const updatedFields = aiImport.editableFields.map((f, fi) =>
@@ -265,16 +276,33 @@ function AIFieldItem({
       <div className={`flex items-center gap-1 pr-2 transition-colors ${isSelected ? 'bg-cyan-500/10' : ''}`}>
         <button
           onClick={() => setOpen((v) => !v)}
-          className="flex-1 flex items-center gap-2 px-4 py-2 text-left hover:bg-white/5"
+          className="flex-1 flex items-center gap-2 px-4 py-2 text-left hover:bg-white/5 min-w-0"
         >
           <ChevronDown
             className={`w-3 h-3 shrink-0 transition-transform ${open ? '' : '-rotate-90'} ${isSelected ? 'text-cyan-400' : 'text-gray-500'}`}
           />
-          <span className={`font-mono text-xs font-semibold tracking-wide ${(field.opacity ?? 1) === 0 ? 'opacity-30' : ''} ${isSelected ? 'text-cyan-300' : 'text-cyan-400'}`}>{field.layerName}</span>
-          {field.isImageSlot && <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded">Bild</span>}
-          {field.type === 'graphic' && !field.isImageSlot && <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">Grafik</span>}
-          {isSelected && <span className="ml-auto text-[10px] text-cyan-500 font-normal">aktiv</span>}
+          <span className={`font-mono text-xs font-semibold tracking-wide truncate ${(field.opacity ?? 1) === 0 ? 'opacity-30' : ''} ${isSelected ? 'text-cyan-300' : 'text-cyan-400'}`}>{field.layerName}</span>
+          {field.isImageSlot && <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded shrink-0">Bild</span>}
+          {field.type === 'graphic' && !field.isImageSlot && <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded shrink-0">Grafik</span>}
+          {isSelected && <span className="ml-auto text-[10px] text-cyan-500 font-normal shrink-0">aktiv</span>}
         </button>
+        {/* Reset to default */}
+        {originalField && (
+          <div className="relative shrink-0">
+            <button
+              onClick={resetField}
+              className="p-1 rounded hover:bg-white/10 transition-colors"
+              title="Feld auf Standard zurücksetzen"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-gray-500 hover:text-orange-400 transition-colors" />
+            </button>
+            {resetToast && (
+              <div className="absolute right-0 top-7 z-50 whitespace-nowrap bg-orange-500/90 text-white text-[10px] font-medium px-2 py-1 rounded shadow-lg pointer-events-none">
+                Feld zurückgesetzt
+              </div>
+            )}
+          </div>
+        )}
         <button
           onClick={() => updateField({ opacity: (field.opacity ?? 1) > 0 ? 0 : 1 })}
           className="shrink-0 p-1 rounded hover:bg-white/10 transition-colors"
@@ -418,12 +446,14 @@ function AIFieldList({
   updateConfig,
   selectedFieldIndex,
   aiImportVariants,
+  originalFields,
 }: {
   fields: AIEditableField[]
   aiImport: AIImportData
   updateConfig: (updates: Partial<PostingConfig>) => void
   selectedFieldIndex: number | null
   aiImportVariants: AIImportVariants | null
+  originalFields?: AIEditableField[]
 }) {
   if (fields.length === 0) {
     return (
@@ -437,7 +467,7 @@ function AIFieldList({
       {fields.map((field, i) => {
         if (field.type === 'graphic' && !field.imageUrl) return null
         if (field.isDecorativeLayer) return null
-        return <AIFieldItem key={i} field={field} index={i} aiImport={aiImport} updateConfig={updateConfig} isSelected={selectedFieldIndex === i} aiImportVariants={aiImportVariants} />
+        return <AIFieldItem key={i} field={field} index={i} aiImport={aiImport} updateConfig={updateConfig} isSelected={selectedFieldIndex === i} aiImportVariants={aiImportVariants} originalField={originalFields?.[i]} />
       })}
     </div>
   )
@@ -619,7 +649,20 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                 </button>
               </div>
             )}
-            <AIFieldList fields={config.aiImport.editableFields} aiImport={config.aiImport} updateConfig={updateConfig} selectedFieldIndex={selectedFieldIndex} aiImportVariants={config.aiImportVariants ?? null} />
+            <AIFieldList
+              fields={config.aiImport.editableFields}
+              aiImport={config.aiImport}
+              updateConfig={updateConfig}
+              selectedFieldIndex={selectedFieldIndex}
+              aiImportVariants={config.aiImportVariants ?? null}
+              originalFields={(() => {
+                if (!activeTemplateName) return undefined
+                const group = templateGroups.find(g => g.baseName === activeTemplateName)
+                if (!group) return undefined
+                const variantIdx = config.aiImportVariants?.activeVariantIndex ?? 0
+                return (group.variants[variantIdx] ?? group.variants[0])?.editableFields
+              })()}
+            />
 
           </div>
         )}

@@ -206,11 +206,16 @@ export default function CreatorPage() {
               activeVariantIndex={config.aiImportVariants?.activeVariantIndex}
               onSwitchVariant={(i) => {
                 const vars = config.aiImportVariants!
-                const v = vars.variants[i]
+                const currentIdx = vars.activeVariantIndex
+                // Persist edits from the current variant before switching
+                const updatedVariants = vars.variants.map((v, vi) =>
+                  vi === currentIdx && config.aiImport ? config.aiImport : v
+                )
+                const next = updatedVariants[i]
                 updateConfig({
-                  aiImport: v,
-                  aiImportVariants: { ...vars, activeVariantIndex: i },
-                  format: detectFormat(v.artboardWidth, v.artboardHeight),
+                  aiImport: next,
+                  aiImportVariants: { variants: updatedVariants, activeVariantIndex: i },
+                  format: detectFormat(next.artboardWidth, next.artboardHeight),
                 })
               }}
             />
