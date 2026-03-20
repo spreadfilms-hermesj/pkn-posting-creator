@@ -47,6 +47,8 @@ export default function CreatorPage() {
   const [showSaveDraft, setShowSaveDraft] = useState(false)
   const [showUserProjects, setShowUserProjects] = useState(false)
   const [draftNameInput, setDraftNameInput] = useState('')
+  const [customizeMode, setCustomizeMode] = useState(false)
+  const [pendingDeleteDraftId, setPendingDeleteDraftId] = useState<string | null>(null)
 
   // Load persisted template groups from IndexedDB on mount
   useEffect(() => {
@@ -162,6 +164,26 @@ export default function CreatorPage() {
     setProjectDrafts(prev => prev.filter(d => d.id !== id))
   }, [])
 
+  const saveAsDefault = useCallback(() => {
+    if (!config.aiImport || !activeTemplateName) return
+    setTemplateGroups(prev => prev.map(g => {
+      if (g.baseName !== activeTemplateName) return g
+      const variantIdx = config.aiImportVariants?.activeVariantIndex ?? 0
+      const updatedVariants = g.variants.map((v, vi) =>
+        vi === variantIdx ? { ...v, editableFields: config.aiImport!.editableFields } : v
+      )
+      return { ...g, variants: updatedVariants }
+    }))
+    // Also sync into aiImportVariants so the live variants reflect the new default
+    if (config.aiImportVariants) {
+      const variantIdx = config.aiImportVariants.activeVariantIndex
+      const updatedVariants = config.aiImportVariants.variants.map((v, vi) =>
+        vi === variantIdx ? { ...v, editableFields: config.aiImport!.editableFields } : v
+      )
+      updateConfig({ aiImportVariants: { ...config.aiImportVariants, variants: updatedVariants } })
+    }
+  }, [config.aiImport, config.aiImportVariants, activeTemplateName, updateConfig])
+
   return (
     <div className="h-screen bg-[#0a0118] relative overflow-hidden">
       {/* Background effects */}
@@ -246,6 +268,8 @@ export default function CreatorPage() {
             onOpenAIImport={() => setShowAIImport(true)}
             onRemoveTemplate={removeTemplate}
             onReplaceTemplate={replaceTemplate}
+            customizeMode={customizeMode}
+            onCustomizeModeChange={setCustomizeMode}
           />
           {!(templateMode && !config.aiImport) && <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <PreviewCanvas
@@ -280,6 +304,8 @@ export default function CreatorPage() {
           onSaveProject={config.aiImport ? openSaveDraft : undefined}
           onOpenUserProjects={() => setShowUserProjects(v => !v)}
           userProjectCount={projectDrafts.length}
+          customizeMode={customizeMode}
+          onSaveAsDefault={config.aiImport && activeTemplateName ? saveAsDefault : undefined}
         />
       </div>
 
@@ -352,14 +378,17 @@ export default function CreatorPage() {
                       {draft.templateBaseName && <p className="text-[10px] text-gray-500 truncate">{draft.templateBaseName}</p>}
                       <p className="text-[10px] text-gray-600">{dateStr}</p>
                       <div className="flex gap-1 mt-1">
-                        <button
-                          onClick={() => { loadDraft(draft); setShowUserProjects(false) }}
-                          className="flex-1 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-300 text-[10px] font-medium border border-cyan-500/30 transition-all"
-                        >Laden</button>
-                        <button
-                          onClick={() => deleteDraft(draft.id)}
-                          className="py-1 px-2 rounded bg-white/5 hover:bg-red-500/20 text-gray-500 hover:text-red-400 text-[10px] border border-white/10 hover:border-red-500/30 transition-all"
-                        ><X className="w-3 h-3" /></button>
+                        {pendingDeleteDraftId === draft.id ? (
+                          <>
+                            <button onClick={() => setPendingDeleteDraftId(null)} className="flex-1 py-1 rounded bg-white/10 hover:bg-white/20 text-gray-300 text-[10px] border border-white/20 transition-all">Nein</button>
+                            <button onClick={() => { deleteDraft(draft.id); setPendingDeleteDraftId(null) }} className="flex-1 py-1 rounded bg-red-500/30 hover:bg-red-500/50 text-red-300 text-[10px] border border-red-500/40 transition-all">Ja, löschen</button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => { loadDraft(draft); setShowUserProjects(false) }} className="flex-1 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-300 text-[10px] font-medium border border-cyan-500/30 transition-all">Laden</button>
+                            <button onClick={() => setPendingDeleteDraftId(draft.id)} className="py-1 px-2 rounded bg-white/5 hover:bg-red-500/20 text-gray-500 hover:text-red-400 text-[10px] border border-white/10 hover:border-red-500/30 transition-all"><X className="w-3 h-3" /></button>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

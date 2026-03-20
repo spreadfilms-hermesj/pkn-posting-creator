@@ -23,6 +23,8 @@ interface CreatorSidebarProps {
   onOpenAIImport?: () => void
   onRemoveTemplate?: (baseName: string) => void
   onReplaceTemplate?: (baseName: string) => void
+  customizeMode?: boolean
+  onCustomizeModeChange?: (val: boolean) => void
 }
 
 interface SectionProps {
@@ -495,10 +497,9 @@ function AIFieldList({
   )
 }
 
-export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport, onRemoveTemplate, onReplaceTemplate }: CreatorSidebarProps) {
+export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport, onRemoveTemplate, onReplaceTemplate, customizeMode = false, onCustomizeModeChange }: CreatorSidebarProps) {
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
   const [postSelectorOpen, setPostSelectorOpen] = useState(true)
-  const [customizeMode, setCustomizeMode] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
   const [pendingDeleteBaseName, setPendingDeleteBaseName] = useState<string | null>(null)
   const [pendingSelectBaseName, setPendingSelectBaseName] = useState<string | null>(null)
@@ -546,7 +547,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                 </button>
                 {templateGroups.length > 0 && (
                   <button
-                    onClick={() => { setCustomizeMode(m => !m); setPendingDeleteBaseName(null) }}
+                    onClick={() => { onCustomizeModeChange?.(!customizeMode); setPendingDeleteBaseName(null) }}
                     className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
                       customizeMode
                         ? 'bg-orange-500/30 text-orange-200 border-orange-500/50'

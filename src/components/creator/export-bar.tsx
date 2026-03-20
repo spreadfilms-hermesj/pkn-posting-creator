@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react'
 import type { PostingConfig, Format, AIImportData } from '@/types/posting'
 import { FORMAT_DIMENSIONS } from '@/types/posting'
-import { Download, FileImage, Loader2, LogOut, BookmarkPlus } from 'lucide-react'
+import { Download, FileImage, Loader2, LogOut, BookmarkPlus, ShieldCheck } from 'lucide-react'
 import { toast } from 'sonner'
 
 // ── Format helpers ─────────────────────────────────────────────────────────────
@@ -249,9 +249,11 @@ interface ExportBarProps {
   onSaveProject?: () => void
   onOpenUserProjects?: () => void
   userProjectCount?: number
+  customizeMode?: boolean
+  onSaveAsDefault?: () => void
 }
 
-export function ExportBar({ config, onSaveProject, onOpenUserProjects, userProjectCount = 0 }: ExportBarProps) {
+export function ExportBar({ config, onSaveProject, onOpenUserProjects, userProjectCount = 0, customizeMode, onSaveAsDefault }: ExportBarProps) {
   const [exporting, setExporting] = useState<string | null>(null)
 
   // In AI import mode, only show formats matching imported artboards
@@ -369,6 +371,15 @@ export function ExportBar({ config, onSaveProject, onOpenUserProjects, userProje
                   >
                     <BookmarkPlus className="w-4 h-4" />
                     Projekt speichern
+                  </button>
+                )}
+                {customizeMode && onSaveAsDefault && (
+                  <button
+                    onClick={onSaveAsDefault}
+                    className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 font-semibold text-sm border border-orange-500/30 transition-all"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    Als Template-Standard speichern
                   </button>
                 )}
                 {onOpenUserProjects && (
