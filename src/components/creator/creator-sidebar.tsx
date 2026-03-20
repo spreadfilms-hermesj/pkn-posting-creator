@@ -112,8 +112,8 @@ function AIFieldItem({
 
   const resetField = () => {
     if (!originalField) return
-    const { value, x, y, fontSize, color, textAlign, scale, scaleY, opacity } = originalField
-    updateField({ value, x, y, fontSize, color, textAlign, scale, scaleY: scaleY ?? scale, opacity: opacity ?? 1 })
+    const { value, x, y, fontSize, color, textAlign, scale, scaleY, opacity, imageUrl } = originalField
+    updateField({ value, x, y, fontSize, color, textAlign, scale, scaleY: scaleY ?? scale, opacity: opacity ?? 1, imageUrl })
     setResetToast(true)
     setTimeout(() => setResetToast(false), 2000)
   }
