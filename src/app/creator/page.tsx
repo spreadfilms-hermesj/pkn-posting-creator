@@ -270,6 +270,7 @@ export default function CreatorPage() {
             onReplaceTemplate={replaceTemplate}
             customizeMode={customizeMode}
             onCustomizeModeChange={setCustomizeMode}
+            onSaveAsDefault={config.aiImport && activeTemplateName ? saveAsDefault : undefined}
           />
           {!(templateMode && !config.aiImport) && <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <PreviewCanvas
@@ -304,8 +305,6 @@ export default function CreatorPage() {
           onSaveProject={config.aiImport ? openSaveDraft : undefined}
           onOpenUserProjects={() => setShowUserProjects(v => !v)}
           userProjectCount={projectDrafts.length}
-          customizeMode={customizeMode}
-          onSaveAsDefault={config.aiImport && activeTemplateName ? saveAsDefault : undefined}
         />
       </div>
 

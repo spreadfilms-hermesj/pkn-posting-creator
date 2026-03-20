@@ -10,7 +10,7 @@ import { BrandToggles } from './brand-toggles'
 import { BrandSettingsComponent } from './brand-settings'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload, Link2, Unlink2, Settings2, X, RefreshCw, Trash2, RotateCcw } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload, Link2, Unlink2, Settings2, X, RefreshCw, Trash2, RotateCcw, ShieldCheck } from 'lucide-react'
 
 interface CreatorSidebarProps {
   config: PostingConfig
@@ -25,6 +25,7 @@ interface CreatorSidebarProps {
   onReplaceTemplate?: (baseName: string) => void
   customizeMode?: boolean
   onCustomizeModeChange?: (val: boolean) => void
+  onSaveAsDefault?: () => void
 }
 
 interface SectionProps {
@@ -497,7 +498,7 @@ function AIFieldList({
   )
 }
 
-export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport, onRemoveTemplate, onReplaceTemplate, customizeMode = false, onCustomizeModeChange }: CreatorSidebarProps) {
+export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport, onRemoveTemplate, onReplaceTemplate, customizeMode = false, onCustomizeModeChange, onSaveAsDefault }: CreatorSidebarProps) {
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
   const [postSelectorOpen, setPostSelectorOpen] = useState(true)
   const [adminOpen, setAdminOpen] = useState(false)
@@ -537,25 +538,36 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                 : <ChevronDown className="w-4 h-4 text-gray-500" />}
             </button>
             {adminOpen && (
-              <div className="px-4 pb-4 flex gap-2">
-                <button
-                  onClick={() => onOpenAIImport?.()}
-                  className="flex-1 flex items-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 hover:from-cyan-500/30 hover:to-blue-600/30 text-cyan-300 border border-cyan-500/30 text-sm font-medium transition-all"
-                >
-                  <FileCode2 className="w-4 h-4" />
-                  AI importieren
-                </button>
-                {templateGroups.length > 0 && (
+              <div className="px-4 pb-4 flex flex-col gap-2">
+                <div className="flex gap-2">
                   <button
-                    onClick={() => { onCustomizeModeChange?.(!customizeMode); setPendingDeleteBaseName(null) }}
-                    className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
-                      customizeMode
-                        ? 'bg-orange-500/30 text-orange-200 border-orange-500/50'
-                        : 'bg-white/5 hover:bg-white/10 text-gray-400 border-white/10'
-                    }`}
+                    onClick={() => onOpenAIImport?.()}
+                    className="flex-1 flex items-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 hover:from-cyan-500/30 hover:to-blue-600/30 text-cyan-300 border border-cyan-500/30 text-sm font-medium transition-all"
                   >
-                    <Settings2 className="w-4 h-4" />
-                    Anpassen
+                    <FileCode2 className="w-4 h-4" />
+                    AI importieren
+                  </button>
+                  {templateGroups.length > 0 && (
+                    <button
+                      onClick={() => { onCustomizeModeChange?.(!customizeMode); setPendingDeleteBaseName(null) }}
+                      className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
+                        customizeMode
+                          ? 'bg-orange-500/30 text-orange-200 border-orange-500/50'
+                          : 'bg-white/5 hover:bg-white/10 text-gray-400 border-white/10'
+                      }`}
+                    >
+                      <Settings2 className="w-4 h-4" />
+                      Anpassen
+                    </button>
+                  )}
+                </div>
+                {customizeMode && onSaveAsDefault && (
+                  <button
+                    onClick={onSaveAsDefault}
+                    className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 border border-orange-500/30 text-sm font-medium transition-all"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    Als Template-Standard speichern
                   </button>
                 )}
               </div>
