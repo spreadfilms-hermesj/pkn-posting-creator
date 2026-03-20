@@ -10,6 +10,7 @@ import { PreviewCanvas } from '@/components/creator/preview-canvas'
 import { ExportBar } from '@/components/creator/export-bar'
 import { AIImportDialog } from '@/components/creator/ai-import-dialog'
 import { loadTemplateGroups, saveTemplateGroups, loadProjectDrafts, saveProjectDrafts } from '@/lib/template-storage'
+import { toast } from 'sonner'
 
 
 const FORMAT_RATIOS: [Format, number][] = [
@@ -182,6 +183,7 @@ export default function CreatorPage() {
       )
       updateConfig({ aiImportVariants: { ...config.aiImportVariants, variants: updatedVariants } })
     }
+    toast.success('Template-Standard gespeichert')
   }, [config.aiImport, config.aiImportVariants, activeTemplateName, updateConfig])
 
   return (
