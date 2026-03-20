@@ -47,6 +47,16 @@ export interface TemplateGroup {
   variants: AIImportData[] // all artboards for this template
 }
 
+export interface ProjectDraft {
+  id: string                        // unique ID
+  name: string                      // user-provided name
+  createdAt: string                 // ISO date string
+  aiImport: AIImportData            // snapshot of aiImport with all edits
+  aiImportVariants: AIImportVariants | null
+  format: Format
+  templateBaseName?: string         // which template this is based on
+}
+
 export interface BrandSettings {
   logo: string | null
   logoText: string

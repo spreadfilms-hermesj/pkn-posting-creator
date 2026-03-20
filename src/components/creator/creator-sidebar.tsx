@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useRef } from 'react'
-import type { PostingConfig, TemplateGroup } from '@/types/posting'
+import type { PostingConfig, TemplateGroup, ProjectDraft } from '@/types/posting'
 import { defaultConfig } from '@/types/posting'
 import { PostingGraphic } from './posting-graphic'
 import { MediaUploader } from './media-uploader'
@@ -23,6 +23,9 @@ interface CreatorSidebarProps {
   onOpenAIImport?: () => void
   onRemoveTemplate?: (baseName: string) => void
   onReplaceTemplate?: (baseName: string) => void
+  projectDrafts?: ProjectDraft[]
+  onLoadDraft?: (draft: ProjectDraft) => void
+  onDeleteDraft?: (id: string) => void
 }
 
 interface SectionProps {
@@ -495,12 +498,14 @@ function AIFieldList({
   )
 }
 
-export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport, onRemoveTemplate, onReplaceTemplate }: CreatorSidebarProps) {
+export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport, onRemoveTemplate, onReplaceTemplate, projectDrafts = [], onLoadDraft, onDeleteDraft }: CreatorSidebarProps) {
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
   const [postSelectorOpen, setPostSelectorOpen] = useState(true)
   const [customizeMode, setCustomizeMode] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
   const [pendingDeleteBaseName, setPendingDeleteBaseName] = useState<string | null>(null)
+  const [draftsOpen, setDraftsOpen] = useState(true)
+  const [pendingDeleteDraftId, setPendingDeleteDraftId] = useState<string | null>(null)
 
   const toggleSection = (section: string) => {
     setOpenSections((prev) =>
@@ -642,6 +647,81 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                       <div className="px-2 py-2">
                         <p className={`text-xs font-semibold truncate ${customizeMode ? 'text-orange-200' : isActive ? 'text-violet-200' : 'text-gray-300'}`}>{g.baseName}</p>
                         <p className="text-[10px] text-gray-500 mt-0.5">{g.variants.length} Format{g.variants.length !== 1 ? 'e' : ''}</p>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* User Projects — saved drafts */}
+        {templateMode && projectDrafts.length > 0 && (
+          <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+            <button
+              onClick={() => setDraftsOpen(o => !o)}
+              className="w-full px-5 py-4 flex items-center justify-between hover:bg-white/5 transition-colors"
+            >
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-gray-300 uppercase tracking-wide">User Projects</span>
+                <span className="text-[10px] bg-white/10 text-gray-400 px-2 py-0.5 rounded-full">{projectDrafts.length}</span>
+              </div>
+              {draftsOpen
+                ? <ChevronUp className="w-4 h-4 text-gray-500" />
+                : <ChevronDown className="w-4 h-4 text-gray-500" />}
+            </button>
+            {draftsOpen && (
+              <div className="px-3 pb-3 space-y-2">
+                {projectDrafts.map(draft => {
+                  const artW = draft.aiImport.artboardWidth
+                  const artH = draft.aiImport.artboardHeight
+                  const DRAFT_THUMB = 56
+                  const thumbScale = DRAFT_THUMB / artW
+                  const thumbH = Math.round(artH * thumbScale)
+                  const thumbConfig = { ...defaultConfig, aiImport: draft.aiImport, aiImportVariants: null }
+                  const dateStr = new Date(draft.createdAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                  return (
+                    <div key={draft.id} className="flex items-center gap-3 p-2 rounded-xl bg-white/5 border border-white/10 hover:bg-white/10 transition-all group">
+                      {/* Thumbnail */}
+                      <div style={{ width: DRAFT_THUMB, height: thumbH, overflow: 'hidden', position: 'relative', flexShrink: 0, borderRadius: 6 }}>
+                        <div style={{ transform: `scale(${thumbScale})`, transformOrigin: 'top left', width: artW, height: artH, pointerEvents: 'none' }}>
+                          <PostingGraphic config={thumbConfig} />
+                        </div>
+                      </div>
+                      {/* Info */}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-gray-200 truncate">{draft.name}</p>
+                        {draft.templateBaseName && (
+                          <p className="text-[10px] text-gray-500 truncate">{draft.templateBaseName}</p>
+                        )}
+                        <p className="text-[10px] text-gray-600 mt-0.5">{dateStr}</p>
+                      </div>
+                      {/* Actions */}
+                      <div className="flex flex-col gap-1 shrink-0">
+                        {pendingDeleteDraftId === draft.id ? (
+                          <div className="flex gap-1">
+                            <button
+                              onClick={() => setPendingDeleteDraftId(null)}
+                              className="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-gray-300 text-[10px] border border-white/20 transition-all"
+                            >Nein</button>
+                            <button
+                              onClick={() => { onDeleteDraft?.(draft.id); setPendingDeleteDraftId(null) }}
+                              className="px-2 py-1 rounded bg-red-500/30 hover:bg-red-500/50 text-red-300 text-[10px] border border-red-500/40 transition-all"
+                            >Ja</button>
+                          </div>
+                        ) : (
+                          <>
+                            <button
+                              onClick={() => onLoadDraft?.(draft)}
+                              className="px-2 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 text-[10px] border border-cyan-500/30 transition-all"
+                            >Laden</button>
+                            <button
+                              onClick={() => setPendingDeleteDraftId(draft.id)}
+                              className="px-2 py-1 rounded bg-white/5 hover:bg-red-500/20 text-gray-500 hover:text-red-400 text-[10px] border border-white/10 hover:border-red-500/30 transition-all"
+                            >Löschen</button>
+                          </>
+                        )}
                       </div>
                     </div>
                   )

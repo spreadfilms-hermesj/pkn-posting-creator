@@ -2,13 +2,13 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { Sparkles, Archive, X } from 'lucide-react'
-import type { PostingConfig, Format, TemplateGroup } from '@/types/posting'
+import type { PostingConfig, Format, TemplateGroup, ProjectDraft } from '@/types/posting'
 import { defaultConfig } from '@/types/posting'
 import { CreatorSidebar } from '@/components/creator/creator-sidebar'
 import { PreviewCanvas } from '@/components/creator/preview-canvas'
 import { ExportBar } from '@/components/creator/export-bar'
 import { AIImportDialog } from '@/components/creator/ai-import-dialog'
-import { loadTemplateGroups, saveTemplateGroups } from '@/lib/template-storage'
+import { loadTemplateGroups, saveTemplateGroups, loadProjectDrafts, saveProjectDrafts } from '@/lib/template-storage'
 
 
 const FORMAT_RATIOS: [Format, number][] = [
@@ -41,6 +41,10 @@ export default function CreatorPage() {
   const [templateMode, setTemplateMode] = useState(false)
   // When set, the next AI import will replace this template group
   const [replacingBaseName, setReplacingBaseName] = useState<string | null>(null)
+  // Project drafts
+  const [projectDrafts, setProjectDrafts] = useState<ProjectDraft[]>([])
+  const [showSaveDraft, setShowSaveDraft] = useState(false)
+  const [draftNameInput, setDraftNameInput] = useState('')
 
   // Load persisted template groups from IndexedDB on mount
   useEffect(() => {
@@ -53,6 +57,16 @@ export default function CreatorPage() {
   useEffect(() => {
     saveTemplateGroups(templateGroups)
   }, [templateGroups])
+
+  // Load persisted drafts from IndexedDB on mount
+  useEffect(() => {
+    loadProjectDrafts().then(saved => { if (saved.length > 0) setProjectDrafts(saved) })
+  }, [])
+
+  // Persist drafts to IndexedDB whenever they change
+  useEffect(() => {
+    saveProjectDrafts(projectDrafts)
+  }, [projectDrafts])
 
   // ── Global undo history ───────────────────────────────────────────────────
   const configRef = useRef<PostingConfig>(defaultConfig)
@@ -110,6 +124,41 @@ export default function CreatorPage() {
 
   // Base name of the currently active AI import (used to highlight active template button)
   const activeTemplateName = config.aiImport ? extractBaseName(config.aiImport.artboardName) : null
+
+  const openSaveDraft = useCallback(() => {
+    const base = activeTemplateName ?? 'Entwurf'
+    const date = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    setDraftNameInput(`${base} — ${date}`)
+    setShowSaveDraft(true)
+  }, [activeTemplateName])
+
+  const confirmSaveDraft = useCallback(() => {
+    if (!config.aiImport) return
+    const draft: ProjectDraft = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      name: draftNameInput.trim() || 'Entwurf',
+      createdAt: new Date().toISOString(),
+      aiImport: config.aiImport,
+      aiImportVariants: config.aiImportVariants,
+      format: config.format,
+      templateBaseName: activeTemplateName ?? undefined,
+    }
+    setProjectDrafts(prev => [draft, ...prev])
+    setShowSaveDraft(false)
+  }, [config.aiImport, config.aiImportVariants, config.format, activeTemplateName, draftNameInput])
+
+  const loadDraft = useCallback((draft: ProjectDraft) => {
+    updateConfig({
+      aiImport: draft.aiImport,
+      aiImportVariants: draft.aiImportVariants,
+      format: draft.format,
+    })
+    setTemplateMode(true)
+  }, [updateConfig])
+
+  const deleteDraft = useCallback((id: string) => {
+    setProjectDrafts(prev => prev.filter(d => d.id !== id))
+  }, [])
 
   return (
     <div className="h-screen bg-[#0a0118] relative overflow-hidden">
@@ -195,6 +244,9 @@ export default function CreatorPage() {
             onOpenAIImport={() => setShowAIImport(true)}
             onRemoveTemplate={removeTemplate}
             onReplaceTemplate={replaceTemplate}
+            projectDrafts={projectDrafts}
+            onLoadDraft={loadDraft}
+            onDeleteDraft={deleteDraft}
           />
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <PreviewCanvas
@@ -223,7 +275,7 @@ export default function CreatorPage() {
         </div>
 
         {/* Export Bar */}
-        <ExportBar config={config} />
+        <ExportBar config={config} onSaveProject={config.aiImport ? openSaveDraft : undefined} />
       </div>
 
       {/* AI Import Dialog */}
@@ -257,6 +309,41 @@ export default function CreatorPage() {
           }}
           onClose={() => { setShowAIImport(false); setReplacingBaseName(null) }}
         />
+      )}
+
+      {/* Save Draft Dialog */}
+      {showSaveDraft && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-[#13082a] border border-white/10 rounded-2xl shadow-2xl p-6 w-[360px] flex flex-col gap-4">
+            <div>
+              <h2 className="text-base font-bold text-white mb-1">Projekt speichern</h2>
+              <p className="text-xs text-gray-400">Gib dem Entwurf einen Namen um ihn später wiederzufinden.</p>
+            </div>
+            <input
+              type="text"
+              value={draftNameInput}
+              onChange={e => setDraftNameInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') confirmSaveDraft(); if (e.key === 'Escape') setShowSaveDraft(false) }}
+              className="w-full px-3 py-2.5 bg-black/40 border border-white/15 text-white rounded-xl text-sm focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              placeholder="Entwurf Name..."
+              autoFocus
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowSaveDraft(false)}
+                className="flex-1 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-gray-300 text-sm font-medium border border-white/10 transition-all"
+              >
+                Abbrechen
+              </button>
+              <button
+                onClick={confirmSaveDraft}
+                className="flex-1 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white text-sm font-semibold transition-all"
+              >
+                Speichern
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

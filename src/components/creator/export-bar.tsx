@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react'
 import type { PostingConfig, Format, AIImportData } from '@/types/posting'
 import { FORMAT_DIMENSIONS } from '@/types/posting'
-import { Download, FileImage, Loader2, LogOut } from 'lucide-react'
+import { Download, FileImage, Loader2, LogOut, BookmarkPlus } from 'lucide-react'
 import { toast } from 'sonner'
 
 // ── Format helpers ─────────────────────────────────────────────────────────────
@@ -246,9 +246,10 @@ function getFilename(config: PostingConfig, format: Format): string {
 
 interface ExportBarProps {
   config: PostingConfig
+  onSaveProject?: () => void
 }
 
-export function ExportBar({ config }: ExportBarProps) {
+export function ExportBar({ config, onSaveProject }: ExportBarProps) {
   const [exporting, setExporting] = useState<string | null>(null)
 
   // In AI import mode, only show formats matching imported artboards
@@ -369,6 +370,16 @@ export function ExportBar({ config }: ExportBarProps) {
             ))}
 
             <div className="w-px h-8 bg-white/20 mx-1" />
+
+            {onSaveProject && (
+              <button
+                onClick={onSaveProject}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-violet-500/20 hover:bg-violet-500/30 text-violet-300 font-semibold text-sm border border-violet-500/30 transition-all"
+              >
+                <BookmarkPlus className="w-4 h-4" />
+                Projekt speichern
+              </button>
+            )}
 
             <button
               onClick={exportAll}
