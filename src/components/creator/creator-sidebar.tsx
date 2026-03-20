@@ -501,6 +501,7 @@ function AIFieldList({
 export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport, onRemoveTemplate, onReplaceTemplate, customizeMode = false, onCustomizeModeChange, onSaveAsDefault }: CreatorSidebarProps) {
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
   const [postSelectorOpen, setPostSelectorOpen] = useState(true)
+  const [templateSort, setTemplateSort] = useState<'default' | 'az' | 'za' | 'most' | 'least'>('default')
   const [adminOpen, setAdminOpen] = useState(false)
   const [pendingDeleteBaseName, setPendingDeleteBaseName] = useState<string | null>(null)
   const [pendingSelectBaseName, setPendingSelectBaseName] = useState<string | null>(null)
@@ -588,8 +589,35 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                 : <ChevronDown className="w-4 h-4 text-violet-400" />}
             </button>
             {postSelectorOpen && (
+              <>
+                {/* Sort pills */}
+                <div className="px-4 pb-2 flex flex-wrap gap-1.5">
+                  {([
+                    ['default', 'Standard'],
+                    ['az', 'A → Z'],
+                    ['za', 'Z → A'],
+                    ['most', 'Meiste Formate'],
+                    ['least', 'Wenigste Formate'],
+                  ] as const).map(([val, label]) => (
+                    <button
+                      key={val}
+                      onClick={() => setTemplateSort(val)}
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition-all border ${
+                        templateSort === val
+                          ? 'bg-violet-500/30 border-violet-400/60 text-violet-200'
+                          : 'bg-white/5 border-white/10 text-gray-500 hover:text-gray-300 hover:bg-white/10'
+                      }`}
+                    >{label}</button>
+                  ))}
+                </div>
               <div className="px-4 pb-4 grid grid-cols-2 gap-3">
-                {templateGroups.map(g => {
+                {[...templateGroups].sort((a, b) => {
+                  if (templateSort === 'az') return a.baseName.localeCompare(b.baseName)
+                  if (templateSort === 'za') return b.baseName.localeCompare(a.baseName)
+                  if (templateSort === 'most') return b.variants.length - a.variants.length
+                  if (templateSort === 'least') return a.variants.length - b.variants.length
+                  return 0
+                }).map(g => {
                   const isActive = activeTemplateName === g.baseName
                   const bestVariant = getBestVariant(g.variants)
                   const artW = bestVariant.artboardWidth
@@ -664,6 +692,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                   )
                 })}
               </div>
+              </>
             )}
           </div>
         )}
