@@ -10,7 +10,7 @@ import { BrandToggles } from './brand-toggles'
 import { BrandSettingsComponent } from './brand-settings'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload, Link2, Unlink2, Settings2, X, RefreshCw, Trash2, RotateCcw, ShieldCheck } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload, Link2, Unlink2, Settings2, X, RefreshCw, Trash2, RotateCcw, ShieldCheck, ArrowUpDown } from 'lucide-react'
 
 interface CreatorSidebarProps {
   config: PostingConfig
@@ -502,6 +502,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
   const [postSelectorOpen, setPostSelectorOpen] = useState(true)
   const [templateSort, setTemplateSort] = useState<'default' | 'az' | 'za' | 'most' | 'least'>('default')
+  const [sortDropdownOpen, setSortDropdownOpen] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
   const [pendingDeleteBaseName, setPendingDeleteBaseName] = useState<string | null>(null)
   const [pendingSelectBaseName, setPendingSelectBaseName] = useState<string | null>(null)
@@ -518,6 +519,13 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.postType])
+
+  useEffect(() => {
+    if (!sortDropdownOpen) return
+    const close = () => setSortDropdownOpen(false)
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [sortDropdownOpen])
 
   return (
     <div className="w-[400px] min-w-[400px] border-r border-white/10 bg-black/20 backdrop-blur-xl overflow-y-auto">
@@ -579,37 +587,57 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
           {/* Template post selector — shown in template mode */}
         {templateMode && templateGroups.length > 0 && (
           <div className="bg-violet-500/10 border border-violet-500/30 rounded-2xl overflow-hidden">
-            <button
-              onClick={() => setPostSelectorOpen(o => !o)}
-              className="w-full px-5 py-4 flex items-center justify-between hover:bg-white/5 transition-colors"
-            >
-              <span className="text-sm font-semibold text-violet-300 uppercase tracking-wide">Post auswählen</span>
-              {postSelectorOpen
-                ? <ChevronUp className="w-4 h-4 text-violet-400" />
-                : <ChevronDown className="w-4 h-4 text-violet-400" />}
-            </button>
+            <div className="px-5 py-4 flex items-center justify-between">
+              <button
+                onClick={() => setPostSelectorOpen(o => !o)}
+                className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+              >
+                <span className="text-sm font-semibold text-violet-300 uppercase tracking-wide">Post auswählen</span>
+                {postSelectorOpen
+                  ? <ChevronUp className="w-4 h-4 text-violet-400" />
+                  : <ChevronDown className="w-4 h-4 text-violet-400" />}
+              </button>
+              {/* Sort dropdown */}
+              <div className="relative">
+                <button
+                  onClick={() => setSortDropdownOpen(o => !o)}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${
+                    templateSort !== 'default'
+                      ? 'bg-violet-500/20 border-violet-400/50 text-violet-300'
+                      : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-gray-200'
+                  }`}
+                >
+                  <ArrowUpDown className="w-3.5 h-3.5" />
+                  <ChevronDown className="w-3 h-3 opacity-60" />
+                </button>
+                {sortDropdownOpen && (
+                  <div className="absolute right-0 top-full mt-1 z-50 bg-[#1a0f35] border border-white/15 rounded-xl shadow-2xl overflow-hidden min-w-[160px]">
+                    {([
+                      ['default', 'Standard'],
+                      ['az', 'A → Z'],
+                      ['za', 'Z → A'],
+                      ['most', 'Meiste Formate'],
+                      ['least', 'Wenigste Formate'],
+                    ] as const).map(([val, label]) => (
+                      <button
+                        key={val}
+                        onClick={() => { setTemplateSort(val); setSortDropdownOpen(false) }}
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-[11px] transition-colors text-left ${
+                          templateSort === val
+                            ? 'bg-violet-500/25 text-violet-200'
+                            : 'text-gray-300 hover:bg-white/10'
+                        }`}
+                      >
+                        {templateSort === val && <span className="w-1.5 h-1.5 rounded-full bg-violet-400 shrink-0" />}
+                        {templateSort !== val && <span className="w-1.5 h-1.5 shrink-0" />}
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
             {postSelectorOpen && (
-              <>
-                {/* Sort pills */}
-                <div className="px-4 pb-2 flex flex-wrap gap-1.5">
-                  {([
-                    ['default', 'Standard'],
-                    ['az', 'A → Z'],
-                    ['za', 'Z → A'],
-                    ['most', 'Meiste Formate'],
-                    ['least', 'Wenigste Formate'],
-                  ] as const).map(([val, label]) => (
-                    <button
-                      key={val}
-                      onClick={() => setTemplateSort(val)}
-                      className={`px-2.5 py-1 rounded-full text-[10px] font-medium transition-all border ${
-                        templateSort === val
-                          ? 'bg-violet-500/30 border-violet-400/60 text-violet-200'
-                          : 'bg-white/5 border-white/10 text-gray-500 hover:text-gray-300 hover:bg-white/10'
-                      }`}
-                    >{label}</button>
-                  ))}
-                </div>
               <div className="px-4 pb-4 grid grid-cols-2 gap-3">
                 {[...templateGroups].sort((a, b) => {
                   if (templateSort === 'az') return a.baseName.localeCompare(b.baseName)
@@ -692,7 +720,6 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                   )
                 })}
               </div>
-              </>
             )}
           </div>
         )}
