@@ -108,11 +108,15 @@ Artboards are grouped by base name (stripping `_9:16` / `_16:9` etc. suffix) int
 - `templateMode: boolean` — UI state in `page.tsx`; `true` when Template preset is active
 - `TemplateGroup { baseName: string, variants: AIImportData[] }` — defined in `src/types/posting.ts`
 - `activeTemplateName` — derived from `extractBaseName(config.aiImport.artboardName)`
-- Template button in header preset bar only shown when `templateGroups.length > 0`
+- Template button in header preset bar always visible when `templateGroups.length > 0`
 - Other preset buttons call `setTemplateMode(false)` when clicked
+- First time entering template mode: canvas is completely hidden (right panel not rendered) until a Post Type is selected
 
 **Sidebar in template mode:**
 - "Post auswählen" section: collapsible (ChevronUp/Down), shows 2-column grid of Post Type cards
+- Sort dropdown: `ArrowUpDown` icon button in header opens dropdown with Standard / A→Z / Z→A / Meiste Formate / Wenigste Formate
+  - `templateSort` state + `sortDropdownOpen` state + `sortDropdownRef` ref (for outside-click close)
+  - Dropdown closes on `mousedown` outside the ref — uses ref.contains() check to avoid closing on item click
 - Each card: live `PostingGraphic` thumbnail (16:9-preferred variant, scaled to THUMB_W=178px), name, format count
 - Active card highlighted with violet border
 - AI Import header row ("AI Import / artboard badge / Entfernen button") **hidden** in template mode
@@ -120,6 +124,29 @@ Artboards are grouped by base name (stripping `_9:16` / `_16:9` etc. suffix) int
 - Only the AI Import editable fields section stays visible
 - `getBestVariant(variants)` in sidebar — picks variant closest to 16:9 ratio for thumbnail
 - `THUMB_W = 178` — computed from sidebar width 400px minus padding/gap
+- Warning dialog when switching to a new Post Type while already editing one
+
+**Super Admin Settings (collapsible, in sidebar):**
+- `adminOpen` state controls collapse
+- Contains: AI Import button, Anpassen (customize) button, "Als Template-Standard speichern" button
+- "Als Template-Standard speichern": saves current `editableFields` into `templateGroups` + `aiImportVariants`; shows `toast.success('Template-Standard gespeichert')`
+- Anpassen mode: overlay on cards with Ersetzen / Entfernen (+ delete confirmation)
+
+### User Projects (page.tsx)
+- `ProjectDraft { id, name, createdAt, aiImport, aiImportVariants, format, templateBaseName? }` — in `src/types/posting.ts`
+- `projectDrafts: ProjectDraft[]` — state in `page.tsx`, persisted in IndexedDB (`projectDrafts` store)
+- "Projekt speichern" button in export bar → save dialog with pre-filled name → `toast.success('„name" gespeichert')`
+- "User Projects" button in export bar opens fixed bottom panel above export bar
+- Panel: compact grid (3→4→5→6→7 columns), THUMB=90px cards
+- Each card: thumbnail, name, templateBaseName, date, Laden / delete (with confirmation)
+- **Rename on double-click**: double-click name → inline input; Enter/blur confirms, Escape cancels
+  - `renamingDraftId` + `renameInput` state, `renameDraft(id, name)` callback
+- `loadDraft(draft)` restores `aiImport`, `aiImportVariants`, `format` into config
+
+### Toast notifications (sonner)
+- `sonner` already set up via `src/components/ui/sonner.tsx` + `<Toaster>` in `src/app/layout.tsx`
+- `import { toast } from 'sonner'` in `page.tsx`
+- Used for: save project draft, save as template default
 
 ### Variant Switcher (preview-canvas.tsx)
 - Shown inline **below the main canvas** when AI import has >1 variant
