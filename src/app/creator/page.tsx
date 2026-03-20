@@ -8,6 +8,7 @@ import { CreatorSidebar } from '@/components/creator/creator-sidebar'
 import { PreviewCanvas } from '@/components/creator/preview-canvas'
 import { ExportBar } from '@/components/creator/export-bar'
 import { AIImportDialog } from '@/components/creator/ai-import-dialog'
+import { loadTemplateGroups, saveTemplateGroups } from '@/lib/template-storage'
 
 
 const FORMAT_RATIOS: [Format, number][] = [
@@ -38,6 +39,18 @@ export default function CreatorPage() {
   // Template library — accumulates all AI imports across sessions; lives outside PostingConfig
   const [templateGroups, setTemplateGroups] = useState<TemplateGroup[]>([])
   const [templateMode, setTemplateMode] = useState(false)
+
+  // Load persisted template groups from IndexedDB on mount
+  useEffect(() => {
+    loadTemplateGroups().then(saved => {
+      if (saved.length > 0) setTemplateGroups(saved)
+    })
+  }, [])
+
+  // Persist template groups to IndexedDB whenever they change
+  useEffect(() => {
+    if (templateGroups.length > 0) saveTemplateGroups(templateGroups)
+  }, [templateGroups])
 
   // ── Global undo history ───────────────────────────────────────────────────
   const configRef = useRef<PostingConfig>(defaultConfig)
