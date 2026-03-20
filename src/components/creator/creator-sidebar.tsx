@@ -89,6 +89,7 @@ function AIFieldItem({
   const [open, setOpen] = useState(true)
   const [scaleLinked, setScaleLinked] = useState(true)
   const [resetToast, setResetToast] = useState(false)
+  const [resetConfirm, setResetConfirm] = useState(false)
   const ref = React.useRef<HTMLDivElement>(null)
   // Track Shift key for spinner-click detection (mouse clicks don't fire onKeyDown)
   const shiftRef = React.useRef(false)
@@ -290,15 +291,36 @@ function AIFieldItem({
         {originalField && (
           <div className="relative shrink-0">
             <button
-              onClick={resetField}
-              className="p-1 rounded hover:bg-white/10 transition-colors"
+              onClick={() => setResetConfirm(true)}
+              className={`p-1 rounded transition-colors ${resetConfirm ? 'bg-orange-500/20 text-orange-400' : 'hover:bg-white/10 text-gray-500 hover:text-orange-400'}`}
               title="Feld auf Standard zurücksetzen"
             >
-              <RotateCcw className="w-3.5 h-3.5 text-gray-500 hover:text-orange-400 transition-colors" />
+              <RotateCcw className="w-3.5 h-3.5" />
             </button>
+            {resetConfirm && (
+              <div className="absolute right-0 top-7 z-50 bg-[#1a1030] border border-orange-500/40 rounded-xl shadow-xl p-3 w-52">
+                <p className="text-[11px] text-gray-300 leading-snug mb-3">
+                  Feld auf Standardwerte zurücksetzen?
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setResetConfirm(false)}
+                    className="flex-1 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-gray-300 text-[10px] font-medium border border-white/20 transition-all"
+                  >
+                    Nein
+                  </button>
+                  <button
+                    onClick={() => { setResetConfirm(false); resetField() }}
+                    className="flex-1 py-1.5 rounded-lg bg-orange-500/30 hover:bg-orange-500/50 text-orange-200 text-[10px] font-medium border border-orange-500/40 transition-all"
+                  >
+                    Ja, zurücksetzen
+                  </button>
+                </div>
+              </div>
+            )}
             {resetToast && (
               <div className="absolute right-0 top-7 z-50 whitespace-nowrap bg-orange-500/90 text-white text-[10px] font-medium px-2 py-1 rounded shadow-lg pointer-events-none">
-                Feld zurückgesetzt
+                Feld zurückgesetzt ✓
               </div>
             )}
           </div>
