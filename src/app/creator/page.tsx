@@ -1,7 +1,7 @@
 'use client'
 
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { Sparkles, Archive, X, FileCode2 } from 'lucide-react'
+import { Sparkles, Archive, X } from 'lucide-react'
 import type { PostingConfig, Format, TemplateGroup } from '@/types/posting'
 import { defaultConfig } from '@/types/posting'
 import { CreatorSidebar } from '@/components/creator/creator-sidebar'
@@ -118,15 +118,6 @@ export default function CreatorPage() {
                 </div>
               </div>
 
-              {/* AI Import Button */}
-              <button
-                onClick={() => setShowAIImport(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 hover:from-cyan-500/30 hover:to-blue-600/30 text-cyan-300 border border-cyan-500/30 text-sm font-medium transition-all"
-              >
-                <FileCode2 className="w-4 h-4" />
-                AI importieren
-              </button>
-
               {/* Preset Buttons */}
               <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-500">Presets:</span>
@@ -173,6 +164,7 @@ export default function CreatorPage() {
             templateMode={templateMode}
             activeTemplateName={activeTemplateName}
             onSelectTemplate={switchTemplate}
+            onOpenAIImport={() => setShowAIImport(true)}
           />
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <PreviewCanvas

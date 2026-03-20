@@ -20,6 +20,7 @@ interface CreatorSidebarProps {
   templateMode?: boolean
   activeTemplateName?: string | null
   onSelectTemplate?: (baseName: string) => void
+  onOpenAIImport?: () => void
 }
 
 interface SectionProps {
@@ -440,7 +441,7 @@ function AIFieldList({
   )
 }
 
-export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate }: CreatorSidebarProps) {
+export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport }: CreatorSidebarProps) {
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
   const [postSelectorOpen, setPostSelectorOpen] = useState(true)
 
@@ -460,6 +461,17 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
   return (
     <div className="w-[400px] min-w-[400px] border-r border-white/10 bg-black/20 backdrop-blur-xl overflow-y-auto">
       <div className="p-4 pb-24 space-y-3">
+
+          {/* AI Import button — shown in template mode */}
+        {templateMode && (
+          <button
+            onClick={() => onOpenAIImport?.()}
+            className="w-full flex items-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 hover:from-cyan-500/30 hover:to-blue-600/30 text-cyan-300 border border-cyan-500/30 text-sm font-medium transition-all"
+          >
+            <FileCode2 className="w-4 h-4" />
+            AI importieren
+          </button>
+        )}
 
           {/* Template post selector — shown in template mode */}
         {templateMode && templateGroups.length > 0 && (
