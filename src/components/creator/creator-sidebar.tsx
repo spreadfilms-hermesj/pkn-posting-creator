@@ -561,7 +561,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                     </button>
                   )}
                 </div>
-                {customizeMode && onSaveAsDefault && (
+                {onSaveAsDefault && (
                   <button
                     onClick={onSaveAsDefault}
                     className="w-full flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-orange-500/20 hover:bg-orange-500/30 text-orange-300 border border-orange-500/30 text-sm font-medium transition-all"
