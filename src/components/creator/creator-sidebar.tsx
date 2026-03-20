@@ -10,7 +10,7 @@ import { BrandToggles } from './brand-toggles'
 import { BrandSettingsComponent } from './brand-settings'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload, Link2, Unlink2, Settings2, X, RefreshCw } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload, Link2, Unlink2, Settings2, X, RefreshCw, Trash2 } from 'lucide-react'
 
 interface CreatorSidebarProps {
   config: PostingConfig
@@ -448,6 +448,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
   const [postSelectorOpen, setPostSelectorOpen] = useState(true)
   const [customizeMode, setCustomizeMode] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
+  const [pendingDeleteBaseName, setPendingDeleteBaseName] = useState<string | null>(null)
 
   const toggleSection = (section: string) => {
     setOpenSections((prev) =>
@@ -492,7 +493,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                 </button>
                 {templateGroups.length > 0 && (
                   <button
-                    onClick={() => setCustomizeMode(m => !m)}
+                    onClick={() => { setCustomizeMode(m => !m); setPendingDeleteBaseName(null) }}
                     className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
                       customizeMode
                         ? 'bg-orange-500/30 text-orange-200 border-orange-500/50'
@@ -547,24 +548,41 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                         <div style={{ transform: `scale(${thumbScale})`, transformOrigin: 'top left', width: artW, height: artH, pointerEvents: 'none' }}>
                           <PostingGraphic config={thumbConfig} />
                         </div>
-                        {customizeMode && (
-                          <div className="absolute inset-0 bg-black/50 grid grid-cols-2 gap-2 p-2 items-center">
+                        {customizeMode && pendingDeleteBaseName !== g.baseName && (
+                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center gap-2 p-2">
                             <button
                               onClick={e => { e.stopPropagation(); onReplaceTemplate?.(g.baseName) }}
-                              className="flex flex-col items-center gap-1 py-2 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-300 border border-cyan-500/40 transition-all"
-                              title="Ersetzen"
+                              className="flex-1 flex flex-col items-center gap-1 py-2 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-300 border border-cyan-500/40 transition-all"
                             >
                               <RefreshCw className="w-4 h-4" />
                               <span className="text-[10px] font-medium">Ersetzen</span>
                             </button>
                             <button
-                              onClick={e => { e.stopPropagation(); onRemoveTemplate?.(g.baseName) }}
-                              className="flex flex-col items-center gap-1 py-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-300 border border-red-500/40 transition-all"
-                              title="Entfernen"
+                              onClick={e => { e.stopPropagation(); setPendingDeleteBaseName(g.baseName) }}
+                              className="flex-1 flex flex-col items-center gap-1 py-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-300 border border-red-500/40 transition-all"
                             >
-                              <X className="w-4 h-4" />
+                              <Trash2 className="w-4 h-4" />
                               <span className="text-[10px] font-medium">Entfernen</span>
                             </button>
+                          </div>
+                        )}
+                        {customizeMode && pendingDeleteBaseName === g.baseName && (
+                          <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-3 p-3">
+                            <span className="text-white text-[11px] font-semibold text-center leading-tight">Wirklich löschen?</span>
+                            <div className="flex gap-2 w-full">
+                              <button
+                                onClick={e => { e.stopPropagation(); setPendingDeleteBaseName(null) }}
+                                className="flex-1 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-gray-300 text-[10px] font-medium border border-white/20 transition-all"
+                              >
+                                Abbrechen
+                              </button>
+                              <button
+                                onClick={e => { e.stopPropagation(); onRemoveTemplate?.(g.baseName); setPendingDeleteBaseName(null) }}
+                                className="flex-1 py-1.5 rounded-lg bg-red-500/40 hover:bg-red-500/60 text-red-200 text-[10px] font-medium border border-red-500/50 transition-all"
+                              >
+                                Ja, löschen
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>
