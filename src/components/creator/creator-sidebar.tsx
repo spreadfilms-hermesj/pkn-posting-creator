@@ -447,6 +447,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
   const [postSelectorOpen, setPostSelectorOpen] = useState(true)
   const [customizeMode, setCustomizeMode] = useState(false)
+  const [adminOpen, setAdminOpen] = useState(false)
 
   const toggleSection = (section: string) => {
     setOpenSections((prev) =>
@@ -465,28 +466,44 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
     <div className="w-[400px] min-w-[400px] border-r border-white/10 bg-black/20 backdrop-blur-xl overflow-y-auto">
       <div className="p-4 pb-24 space-y-3">
 
-          {/* AI Import + Customize buttons — shown in template mode */}
+          {/* Super Admin Settings — collapsible, shown in template mode */}
         {templateMode && (
-          <div className="flex gap-2">
+          <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
             <button
-              onClick={() => onOpenAIImport?.()}
-              className="flex-1 flex items-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 hover:from-cyan-500/30 hover:to-blue-600/30 text-cyan-300 border border-cyan-500/30 text-sm font-medium transition-all"
+              onClick={() => setAdminOpen(o => !o)}
+              className="w-full px-5 py-3 flex items-center justify-between hover:bg-white/5 transition-colors"
             >
-              <FileCode2 className="w-4 h-4" />
-              AI importieren
+              <div className="flex items-center gap-2">
+                <Settings2 className="w-4 h-4 text-gray-400" />
+                <span className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Super Admin Settings</span>
+              </div>
+              {adminOpen
+                ? <ChevronUp className="w-4 h-4 text-gray-500" />
+                : <ChevronDown className="w-4 h-4 text-gray-500" />}
             </button>
-            {templateGroups.length > 0 && (
-              <button
-                onClick={() => setCustomizeMode(m => !m)}
-                className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
-                  customizeMode
-                    ? 'bg-orange-500/30 text-orange-200 border-orange-500/50'
-                    : 'bg-white/5 hover:bg-white/10 text-gray-400 border-white/10'
-                }`}
-              >
-                <Settings2 className="w-4 h-4" />
-                Anpassen
-              </button>
+            {adminOpen && (
+              <div className="px-4 pb-4 flex gap-2">
+                <button
+                  onClick={() => onOpenAIImport?.()}
+                  className="flex-1 flex items-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 hover:from-cyan-500/30 hover:to-blue-600/30 text-cyan-300 border border-cyan-500/30 text-sm font-medium transition-all"
+                >
+                  <FileCode2 className="w-4 h-4" />
+                  AI importieren
+                </button>
+                {templateGroups.length > 0 && (
+                  <button
+                    onClick={() => setCustomizeMode(m => !m)}
+                    className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
+                      customizeMode
+                        ? 'bg-orange-500/30 text-orange-200 border-orange-500/50'
+                        : 'bg-white/5 hover:bg-white/10 text-gray-400 border-white/10'
+                    }`}
+                  >
+                    <Settings2 className="w-4 h-4" />
+                    Anpassen
+                  </button>
+                )}
+              </div>
             )}
           </div>
         )}
@@ -531,10 +548,10 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                           <PostingGraphic config={thumbConfig} />
                         </div>
                         {customizeMode && (
-                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center gap-2">
+                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center gap-2 px-3">
                             <button
                               onClick={e => { e.stopPropagation(); onReplaceTemplate?.(g.baseName) }}
-                              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-300 border border-cyan-500/40 transition-all"
+                              className="flex-1 flex flex-col items-center gap-1 py-2 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-300 border border-cyan-500/40 transition-all"
                               title="Ersetzen"
                             >
                               <RefreshCw className="w-4 h-4" />
@@ -542,7 +559,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                             </button>
                             <button
                               onClick={e => { e.stopPropagation(); onRemoveTemplate?.(g.baseName) }}
-                              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-300 border border-red-500/40 transition-all"
+                              className="flex-1 flex flex-col items-center gap-1 py-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-300 border border-red-500/40 transition-all"
                               title="Entfernen"
                             >
                               <X className="w-4 h-4" />
