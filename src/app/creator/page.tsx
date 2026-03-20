@@ -152,6 +152,7 @@ export default function CreatorPage() {
     }
     setProjectDrafts(prev => [draft, ...prev])
     setShowSaveDraft(false)
+    toast.success(`„${draft.name}" gespeichert`)
   }, [config.aiImport, config.aiImportVariants, config.format, activeTemplateName, draftNameInput])
 
   const loadDraft = useCallback((draft: ProjectDraft) => {
