@@ -530,8 +530,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                   const artH = bestVariant.artboardHeight
                   const thumbScale = THUMB_W / artW
                   const thumbH = Math.round(artH * thumbScale)
-                  const thumbAiImport = isActive ? (config.aiImport ?? bestVariant) : bestVariant
-                  const thumbConfig = { ...defaultConfig, aiImport: thumbAiImport, aiImportVariants: null }
+                  const thumbConfig = { ...defaultConfig, aiImport: bestVariant, aiImportVariants: null }
                   return (
                     <div
                       key={g.baseName}
