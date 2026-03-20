@@ -148,18 +148,16 @@ export default function CreatorPage() {
                 >
                   Event Strong
                 </button>
-                {templateGroups.length > 0 && (
-                  <button
-                    onClick={() => setTemplateMode(true)}
-                    className={`px-3 py-1.5 rounded-lg text-xs border transition-all ${
-                      templateMode
-                        ? 'bg-violet-500/30 text-violet-200 border-violet-500/50'
-                        : 'bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border-violet-500/30'
-                    }`}
-                  >
-                    Template
-                  </button>
-                )}
+                <button
+                  onClick={() => setTemplateMode(true)}
+                  className={`px-3 py-1.5 rounded-lg text-xs border transition-all ${
+                    templateMode
+                      ? 'bg-violet-500/30 text-violet-200 border-violet-500/50'
+                      : 'bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border-violet-500/30'
+                  }`}
+                >
+                  Template
+                </button>
               </div>
             </div>
           </div>
