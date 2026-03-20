@@ -10,7 +10,7 @@ import { BrandToggles } from './brand-toggles'
 import { BrandSettingsComponent } from './brand-settings'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload, Link2, Unlink2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, FileCode2, Eye, EyeOff, Upload, Link2, Unlink2, Settings2, X, RefreshCw } from 'lucide-react'
 
 interface CreatorSidebarProps {
   config: PostingConfig
@@ -21,6 +21,8 @@ interface CreatorSidebarProps {
   activeTemplateName?: string | null
   onSelectTemplate?: (baseName: string) => void
   onOpenAIImport?: () => void
+  onRemoveTemplate?: (baseName: string) => void
+  onReplaceTemplate?: (baseName: string) => void
 }
 
 interface SectionProps {
@@ -441,9 +443,10 @@ function AIFieldList({
   )
 }
 
-export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport }: CreatorSidebarProps) {
+export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport, onRemoveTemplate, onReplaceTemplate }: CreatorSidebarProps) {
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
   const [postSelectorOpen, setPostSelectorOpen] = useState(true)
+  const [customizeMode, setCustomizeMode] = useState(false)
 
   const toggleSection = (section: string) => {
     setOpenSections((prev) =>
@@ -462,15 +465,30 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
     <div className="w-[400px] min-w-[400px] border-r border-white/10 bg-black/20 backdrop-blur-xl overflow-y-auto">
       <div className="p-4 pb-24 space-y-3">
 
-          {/* AI Import button — shown in template mode */}
+          {/* AI Import + Customize buttons — shown in template mode */}
         {templateMode && (
-          <button
-            onClick={() => onOpenAIImport?.()}
-            className="w-full flex items-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 hover:from-cyan-500/30 hover:to-blue-600/30 text-cyan-300 border border-cyan-500/30 text-sm font-medium transition-all"
-          >
-            <FileCode2 className="w-4 h-4" />
-            AI importieren
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => onOpenAIImport?.()}
+              className="flex-1 flex items-center gap-2 px-4 py-3 rounded-xl bg-gradient-to-r from-cyan-500/20 to-blue-600/20 hover:from-cyan-500/30 hover:to-blue-600/30 text-cyan-300 border border-cyan-500/30 text-sm font-medium transition-all"
+            >
+              <FileCode2 className="w-4 h-4" />
+              AI importieren
+            </button>
+            {templateGroups.length > 0 && (
+              <button
+                onClick={() => setCustomizeMode(m => !m)}
+                className={`flex items-center gap-2 px-4 py-3 rounded-xl border text-sm font-medium transition-all ${
+                  customizeMode
+                    ? 'bg-orange-500/30 text-orange-200 border-orange-500/50'
+                    : 'bg-white/5 hover:bg-white/10 text-gray-400 border-white/10'
+                }`}
+              >
+                <Settings2 className="w-4 h-4" />
+                Anpassen
+              </button>
+            )}
+          </div>
         )}
 
           {/* Template post selector — shown in template mode */}
@@ -494,30 +512,50 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                   const artH = bestVariant.artboardHeight
                   const thumbScale = THUMB_W / artW
                   const thumbH = Math.round(artH * thumbScale)
-                  // For the active template use live config (reflects current edits);
-                  // for others use stored variant data
                   const thumbAiImport = isActive ? (config.aiImport ?? bestVariant) : bestVariant
                   const thumbConfig = { ...defaultConfig, aiImport: thumbAiImport, aiImportVariants: null }
                   return (
-                    <button
+                    <div
                       key={g.baseName}
-                      onClick={() => onSelectTemplate?.(g.baseName)}
-                      className={`rounded-xl overflow-hidden border-2 transition-all text-left ${
-                        isActive
-                          ? 'border-violet-400 bg-violet-500/20'
-                          : 'border-white/10 hover:border-violet-400/50 bg-white/5 hover:bg-white/10'
+                      onClick={() => !customizeMode && onSelectTemplate?.(g.baseName)}
+                      className={`rounded-xl overflow-hidden border-2 transition-all text-left relative ${
+                        customizeMode
+                          ? 'border-orange-500/40 bg-orange-500/5 cursor-default'
+                          : isActive
+                            ? 'border-violet-400 bg-violet-500/20 cursor-pointer'
+                            : 'border-white/10 hover:border-violet-400/50 bg-white/5 hover:bg-white/10 cursor-pointer'
                       }`}
                     >
                       <div style={{ width: THUMB_W, height: thumbH, overflow: 'hidden', position: 'relative' }}>
                         <div style={{ transform: `scale(${thumbScale})`, transformOrigin: 'top left', width: artW, height: artH, pointerEvents: 'none' }}>
                           <PostingGraphic config={thumbConfig} />
                         </div>
+                        {customizeMode && (
+                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center gap-2">
+                            <button
+                              onClick={e => { e.stopPropagation(); onReplaceTemplate?.(g.baseName) }}
+                              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-300 border border-cyan-500/40 transition-all"
+                              title="Ersetzen"
+                            >
+                              <RefreshCw className="w-4 h-4" />
+                              <span className="text-[10px] font-medium">Ersetzen</span>
+                            </button>
+                            <button
+                              onClick={e => { e.stopPropagation(); onRemoveTemplate?.(g.baseName) }}
+                              className="flex flex-col items-center gap-1 px-3 py-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-300 border border-red-500/40 transition-all"
+                              title="Entfernen"
+                            >
+                              <X className="w-4 h-4" />
+                              <span className="text-[10px] font-medium">Entfernen</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                       <div className="px-2 py-2">
-                        <p className={`text-xs font-semibold truncate ${isActive ? 'text-violet-200' : 'text-gray-300'}`}>{g.baseName}</p>
+                        <p className={`text-xs font-semibold truncate ${customizeMode ? 'text-orange-200' : isActive ? 'text-violet-200' : 'text-gray-300'}`}>{g.baseName}</p>
                         <p className="text-[10px] text-gray-500 mt-0.5">{g.variants.length} Format{g.variants.length !== 1 ? 'e' : ''}</p>
                       </div>
-                    </button>
+                    </div>
                   )
                 })}
               </div>

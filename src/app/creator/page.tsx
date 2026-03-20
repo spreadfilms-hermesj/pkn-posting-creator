@@ -39,6 +39,8 @@ export default function CreatorPage() {
   // Template library — accumulates all AI imports across sessions; lives outside PostingConfig
   const [templateGroups, setTemplateGroups] = useState<TemplateGroup[]>([])
   const [templateMode, setTemplateMode] = useState(false)
+  // When set, the next AI import will replace this template group
+  const [replacingBaseName, setReplacingBaseName] = useState<string | null>(null)
 
   // Load persisted template groups from IndexedDB on mount
   useEffect(() => {
@@ -49,7 +51,7 @@ export default function CreatorPage() {
 
   // Persist template groups to IndexedDB whenever they change
   useEffect(() => {
-    if (templateGroups.length > 0) saveTemplateGroups(templateGroups)
+    saveTemplateGroups(templateGroups)
   }, [templateGroups])
 
   // ── Global undo history ───────────────────────────────────────────────────
@@ -92,6 +94,19 @@ export default function CreatorPage() {
       format: detectFormat(variants[0].artboardWidth, variants[0].artboardHeight),
     })
   }, [templateGroups, updateConfig])
+
+  const removeTemplate = useCallback((baseName: string) => {
+    setTemplateGroups(prev => prev.filter(g => g.baseName !== baseName))
+    // If it was the active template, clear the canvas
+    if (config.aiImport && extractBaseName(config.aiImport.artboardName) === baseName) {
+      updateConfig({ aiImport: null, aiImportVariants: null })
+    }
+  }, [config.aiImport, updateConfig])
+
+  const replaceTemplate = useCallback((baseName: string) => {
+    setReplacingBaseName(baseName)
+    setShowAIImport(true)
+  }, [])
 
   // Base name of the currently active AI import (used to highlight active template button)
   const activeTemplateName = config.aiImport ? extractBaseName(config.aiImport.artboardName) : null
@@ -178,6 +193,8 @@ export default function CreatorPage() {
             activeTemplateName={activeTemplateName}
             onSelectTemplate={switchTemplate}
             onOpenAIImport={() => setShowAIImport(true)}
+            onRemoveTemplate={removeTemplate}
+            onReplaceTemplate={replaceTemplate}
           />
           <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <PreviewCanvas
@@ -208,15 +225,20 @@ export default function CreatorPage() {
       {showAIImport && (
         <AIImportDialog
           onImport={(incomingGroups) => {
-            // Merge all incoming groups into the template hub (upsert by baseName)
+            // In replace mode: remove the old group at its position, insert new groups there
             setTemplateGroups(prev => {
               let next = [...prev]
+              if (replacingBaseName) {
+                const replaceIdx = next.findIndex(g => g.baseName === replacingBaseName)
+                if (replaceIdx >= 0) next.splice(replaceIdx, 1)
+              }
               for (const group of incomingGroups) {
                 const idx = next.findIndex(g => g.baseName === group.baseName)
                 if (idx >= 0) { next[idx] = group } else { next = [...next, group] }
               }
               return next
             })
+            setReplacingBaseName(null)
             setTemplateMode(true)
             // Activate the first group's first variant
             const first = incomingGroups[0]
@@ -228,7 +250,7 @@ export default function CreatorPage() {
             })
             setShowAIImport(false)
           }}
-          onClose={() => setShowAIImport(false)}
+          onClose={() => { setShowAIImport(false); setReplacingBaseName(null) }}
         />
       )}
     </div>
