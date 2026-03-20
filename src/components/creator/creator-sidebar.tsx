@@ -548,21 +548,23 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                           <PostingGraphic config={thumbConfig} />
                         </div>
                         {customizeMode && pendingDeleteBaseName !== g.baseName && (
-                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center gap-2 p-2">
-                            <button
-                              onClick={e => { e.stopPropagation(); onReplaceTemplate?.(g.baseName) }}
-                              className="flex-1 flex flex-col items-center gap-1 py-2 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-300 border border-cyan-500/40 transition-all"
-                            >
-                              <RefreshCw className="w-4 h-4" />
-                              <span className="text-[10px] font-medium">Ersetzen</span>
-                            </button>
-                            <button
-                              onClick={e => { e.stopPropagation(); setPendingDeleteBaseName(g.baseName) }}
-                              className="flex-1 flex flex-col items-center gap-1 py-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-300 border border-red-500/40 transition-all"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                              <span className="text-[10px] font-medium">Entfernen</span>
-                            </button>
+                          <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center">
+                            <div className="flex gap-2 px-3 w-full box-border">
+                              <button
+                                onClick={e => { e.stopPropagation(); onReplaceTemplate?.(g.baseName) }}
+                                className="flex-1 min-w-0 flex flex-col items-center gap-1 py-2 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-300 border border-cyan-500/40 transition-all"
+                              >
+                                <RefreshCw className="w-4 h-4" />
+                                <span className="text-[10px] font-medium">Ersetzen</span>
+                              </button>
+                              <button
+                                onClick={e => { e.stopPropagation(); setPendingDeleteBaseName(g.baseName) }}
+                                className="flex-1 min-w-0 flex flex-col items-center gap-1 py-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-300 border border-red-500/40 transition-all"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                                <span className="text-[10px] font-medium">Entfernen</span>
+                              </button>
+                            </div>
                           </div>
                         )}
                         {customizeMode && pendingDeleteBaseName === g.baseName && (
