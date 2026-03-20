@@ -50,6 +50,8 @@ export default function CreatorPage() {
   const [draftNameInput, setDraftNameInput] = useState('')
   const [customizeMode, setCustomizeMode] = useState(false)
   const [pendingDeleteDraftId, setPendingDeleteDraftId] = useState<string | null>(null)
+  const [renamingDraftId, setRenamingDraftId] = useState<string | null>(null)
+  const [renameInput, setRenameInput] = useState('')
 
   // Load persisted template groups from IndexedDB on mount
   useEffect(() => {
@@ -163,6 +165,12 @@ export default function CreatorPage() {
 
   const deleteDraft = useCallback((id: string) => {
     setProjectDrafts(prev => prev.filter(d => d.id !== id))
+  }, [])
+
+  const renameDraft = useCallback((id: string, name: string) => {
+    const trimmed = name.trim()
+    if (trimmed) setProjectDrafts(prev => prev.map(d => d.id === id ? { ...d, name: trimmed } : d))
+    setRenamingDraftId(null)
   }, [])
 
   const saveAsDefault = useCallback(() => {
@@ -358,15 +366,16 @@ export default function CreatorPage() {
           {projectDrafts.length === 0 ? (
             <p className="px-6 py-8 text-sm text-gray-500 text-center">Noch keine gespeicherten Projekte.</p>
           ) : (
-            <div className="overflow-y-auto px-6 py-3 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            <div className="overflow-y-auto px-6 py-3 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
               {projectDrafts.map(draft => {
                 const artW = draft.aiImport.artboardWidth
                 const artH = draft.aiImport.artboardHeight
-                const THUMB = 120
+                const THUMB = 90
                 const thumbScale = THUMB / artW
                 const thumbH = Math.round(artH * thumbScale)
                 const thumbConfig = { ...defaultConfig, aiImport: draft.aiImport, aiImportVariants: null }
                 const dateStr = new Date(draft.createdAt).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                const isRenaming = renamingDraftId === draft.id
                 return (
                   <div key={draft.id} className="flex flex-col rounded-xl overflow-hidden border border-white/10 bg-white/5 hover:bg-white/10 transition-all group">
                     <div style={{ width: THUMB, height: thumbH, overflow: 'hidden', position: 'relative', flexShrink: 0 }}>
@@ -374,20 +383,35 @@ export default function CreatorPage() {
                         <PostingGraphic config={thumbConfig} />
                       </div>
                     </div>
-                    <div className="px-2 py-2 flex-1 flex flex-col gap-1">
-                      <p className="text-xs font-semibold text-gray-200 truncate">{draft.name}</p>
-                      {draft.templateBaseName && <p className="text-[10px] text-gray-500 truncate">{draft.templateBaseName}</p>}
-                      <p className="text-[10px] text-gray-600">{dateStr}</p>
+                    <div className="px-1.5 py-1.5 flex-1 flex flex-col gap-0.5">
+                      {isRenaming ? (
+                        <input
+                          autoFocus
+                          value={renameInput}
+                          onChange={e => setRenameInput(e.target.value)}
+                          onBlur={() => renameDraft(draft.id, renameInput)}
+                          onKeyDown={e => { if (e.key === 'Enter') renameDraft(draft.id, renameInput); if (e.key === 'Escape') setRenamingDraftId(null) }}
+                          className="text-[10px] font-semibold text-white bg-white/10 border border-cyan-500/50 rounded px-1 py-0.5 w-full outline-none"
+                        />
+                      ) : (
+                        <p
+                          className="text-[10px] font-semibold text-gray-200 truncate cursor-text"
+                          title="Doppelklick zum Umbenennen"
+                          onDoubleClick={() => { setRenamingDraftId(draft.id); setRenameInput(draft.name) }}
+                        >{draft.name}</p>
+                      )}
+                      {draft.templateBaseName && <p className="text-[9px] text-gray-500 truncate">{draft.templateBaseName}</p>}
+                      <p className="text-[9px] text-gray-600">{dateStr}</p>
                       <div className="flex gap-1 mt-1">
                         {pendingDeleteDraftId === draft.id ? (
                           <>
-                            <button onClick={() => setPendingDeleteDraftId(null)} className="flex-1 py-1 rounded bg-white/10 hover:bg-white/20 text-gray-300 text-[10px] border border-white/20 transition-all">Nein</button>
-                            <button onClick={() => { deleteDraft(draft.id); setPendingDeleteDraftId(null) }} className="flex-1 py-1 rounded bg-red-500/30 hover:bg-red-500/50 text-red-300 text-[10px] border border-red-500/40 transition-all">Ja, löschen</button>
+                            <button onClick={() => setPendingDeleteDraftId(null)} className="flex-1 py-0.5 rounded bg-white/10 hover:bg-white/20 text-gray-300 text-[9px] border border-white/20 transition-all">Nein</button>
+                            <button onClick={() => { deleteDraft(draft.id); setPendingDeleteDraftId(null) }} className="flex-1 py-0.5 rounded bg-red-500/30 hover:bg-red-500/50 text-red-300 text-[9px] border border-red-500/40 transition-all">Ja</button>
                           </>
                         ) : (
                           <>
-                            <button onClick={() => { loadDraft(draft); setShowUserProjects(false) }} className="flex-1 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-300 text-[10px] font-medium border border-cyan-500/30 transition-all">Laden</button>
-                            <button onClick={() => setPendingDeleteDraftId(draft.id)} className="py-1 px-2 rounded bg-white/5 hover:bg-red-500/20 text-gray-500 hover:text-red-400 text-[10px] border border-white/10 hover:border-red-500/30 transition-all"><X className="w-3 h-3" /></button>
+                            <button onClick={() => { loadDraft(draft); setShowUserProjects(false) }} className="flex-1 py-0.5 rounded bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-300 text-[9px] font-medium border border-cyan-500/30 transition-all">Laden</button>
+                            <button onClick={() => setPendingDeleteDraftId(draft.id)} className="py-0.5 px-1.5 rounded bg-white/5 hover:bg-red-500/20 text-gray-500 hover:text-red-400 text-[9px] border border-white/10 hover:border-red-500/30 transition-all"><X className="w-2.5 h-2.5" /></button>
                           </>
                         )}
                       </div>
