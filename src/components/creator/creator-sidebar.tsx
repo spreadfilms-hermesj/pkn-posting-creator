@@ -501,6 +501,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
   const [customizeMode, setCustomizeMode] = useState(false)
   const [adminOpen, setAdminOpen] = useState(false)
   const [pendingDeleteBaseName, setPendingDeleteBaseName] = useState<string | null>(null)
+  const [pendingSelectBaseName, setPendingSelectBaseName] = useState<string | null>(null)
 
   const toggleSection = (section: string) => {
     setOpenSections((prev) =>
@@ -586,7 +587,10 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                   return (
                     <div
                       key={g.baseName}
-                      onClick={() => !customizeMode && onSelectTemplate?.(g.baseName)}
+                      onClick={() => {
+                        if (customizeMode) return
+                        if (config.aiImport) { setPendingSelectBaseName(g.baseName) } else { onSelectTemplate?.(g.baseName) }
+                      }}
                       className={`rounded-xl overflow-hidden border-2 transition-all text-left relative ${
                         customizeMode
                           ? 'border-orange-500/40 bg-orange-500/5 cursor-default'
@@ -648,6 +652,32 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                 })}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Confirm new post — warns when switching template while editing */}
+        {pendingSelectBaseName && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setPendingSelectBaseName(null)}>
+            <div className="bg-[#13082a] border border-white/10 rounded-2xl shadow-2xl p-6 w-[380px] flex flex-col gap-4" onClick={e => e.stopPropagation()}>
+              <div>
+                <h2 className="text-base font-bold text-white mb-1">Neuen Post erstellen?</h2>
+                <p className="text-sm text-gray-400 leading-relaxed">Du bist dabei, einen neuen Post zu erstellen. Deine aktuellen Änderungen gehen dabei verloren.<br/>Bist du sicher?</p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setPendingSelectBaseName(null)}
+                  className="flex-1 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-gray-300 text-sm font-medium border border-white/10 transition-all"
+                >
+                  Abbrechen
+                </button>
+                <button
+                  onClick={() => { onSelectTemplate?.(pendingSelectBaseName); setPendingSelectBaseName(null) }}
+                  className="flex-1 py-2 rounded-xl bg-gradient-to-r from-red-500/80 to-orange-500/80 hover:from-red-500 hover:to-orange-500 text-white text-sm font-semibold transition-all"
+                >
+                  Ja, weiter
+                </button>
+              </div>
+            </div>
           </div>
         )}
 

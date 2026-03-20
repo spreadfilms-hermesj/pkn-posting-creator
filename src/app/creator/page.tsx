@@ -251,6 +251,7 @@ export default function CreatorPage() {
             <PreviewCanvas
               config={config}
               updateConfig={updateConfig}
+              templateMode={templateMode}
               selectedFieldIndex={selectedFieldIndex}
               onSelectField={setSelectedFieldIndex}
               variants={config.aiImportVariants && config.aiImportVariants.variants.length > 1 ? config.aiImportVariants.variants : undefined}

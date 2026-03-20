@@ -13,6 +13,7 @@ interface PreviewCanvasProps {
   variants?: AIImportData[]
   activeVariantIndex?: number
   onSwitchVariant?: (i: number) => void
+  templateMode?: boolean
 }
 
 const FORMAT_LABELS: Record<Format, string> = {
@@ -42,7 +43,7 @@ function detectFormat(width: number, height: number): Format {
   , FORMAT_ASPECT_RATIOS[0][0])
 }
 
-export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSelectField, variants, activeVariantIndex, onSwitchVariant }: PreviewCanvasProps) {
+export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSelectField, variants, activeVariantIndex, onSwitchVariant, templateMode }: PreviewCanvasProps) {
 
   // ── Base fit scale (same as before) ─────────────────────────────────────────
   const getMainPreviewScale = () => {
@@ -264,7 +265,14 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
               pointerEvents: spaceDown ? 'none' : 'auto',
             }}
           >
-            <PostingGraphic config={config} selectedFieldIndex={selectedFieldIndex} onSelectField={onSelectField} />
+            {templateMode && !config.aiImport ? (
+              <div style={{ width: nativeW, height: nativeH, background: '#0a0118', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12 }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg>
+                <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 14, fontFamily: 'system-ui', textAlign: 'center' }}>Post aus &quot;Post auswählen&quot; wählen</span>
+              </div>
+            ) : (
+              <PostingGraphic config={config} selectedFieldIndex={selectedFieldIndex} onSelectField={onSelectField} />
+            )}
           </div>
 
           {/* Zoom level indicator (bottom-right, always visible) */}
