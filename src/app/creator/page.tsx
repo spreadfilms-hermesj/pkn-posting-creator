@@ -247,7 +247,7 @@ export default function CreatorPage() {
             onRemoveTemplate={removeTemplate}
             onReplaceTemplate={replaceTemplate}
           />
-          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          {!(templateMode && !config.aiImport) && <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <PreviewCanvas
               config={config}
               updateConfig={updateConfig}
@@ -271,7 +271,7 @@ export default function CreatorPage() {
                 })
               }}
             />
-          </div>
+          </div>}
         </div>
 
         {/* Export Bar */}
