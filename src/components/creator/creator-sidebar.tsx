@@ -548,10 +548,10 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                           <PostingGraphic config={thumbConfig} />
                         </div>
                         {customizeMode && (
-                          <div className="absolute inset-0 bg-black/50 flex items-center justify-center gap-2 px-3">
+                          <div className="absolute inset-0 bg-black/50 grid grid-cols-2 gap-2 p-2 items-center">
                             <button
                               onClick={e => { e.stopPropagation(); onReplaceTemplate?.(g.baseName) }}
-                              className="flex-1 flex flex-col items-center gap-1 py-2 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-300 border border-cyan-500/40 transition-all"
+                              className="flex flex-col items-center gap-1 py-2 rounded-lg bg-cyan-500/30 hover:bg-cyan-500/50 text-cyan-300 border border-cyan-500/40 transition-all"
                               title="Ersetzen"
                             >
                               <RefreshCw className="w-4 h-4" />
@@ -559,7 +559,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                             </button>
                             <button
                               onClick={e => { e.stopPropagation(); onRemoveTemplate?.(g.baseName) }}
-                              className="flex-1 flex flex-col items-center gap-1 py-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-300 border border-red-500/40 transition-all"
+                              className="flex flex-col items-center gap-1 py-2 rounded-lg bg-red-500/30 hover:bg-red-500/50 text-red-300 border border-red-500/40 transition-all"
                               title="Entfernen"
                             >
                               <X className="w-4 h-4" />
