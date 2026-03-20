@@ -520,9 +520,13 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [config.postType])
 
+  const sortDropdownRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!sortDropdownOpen) return
-    const close = () => setSortDropdownOpen(false)
+    const close = (e: MouseEvent) => {
+      if (sortDropdownRef.current?.contains(e.target as Node)) return
+      setSortDropdownOpen(false)
+    }
     document.addEventListener('mousedown', close)
     return () => document.removeEventListener('mousedown', close)
   }, [sortDropdownOpen])
@@ -598,7 +602,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                   : <ChevronDown className="w-4 h-4 text-violet-400" />}
               </button>
               {/* Sort dropdown */}
-              <div className="relative">
+              <div className="relative" ref={sortDropdownRef}>
                 <button
                   onClick={() => setSortDropdownOpen(o => !o)}
                   className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all ${
