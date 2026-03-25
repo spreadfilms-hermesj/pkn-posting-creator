@@ -315,7 +315,7 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
         )}
 
         {/* AI Import variant switcher */}
-        {config.aiImport && variants && variants.length > 1 && (
+        {config.aiImport && variants && variants.length >= 1 && (
           <div className="mt-2 flex gap-4 justify-center flex-wrap">
             {variants.map((v, i) => {
               const maxSz = 80

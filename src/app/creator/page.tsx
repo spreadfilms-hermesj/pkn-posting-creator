@@ -298,8 +298,8 @@ export default function CreatorPage() {
               templateMode={templateMode}
               selectedFieldIndex={selectedFieldIndex}
               onSelectField={setSelectedFieldIndex}
-              variants={config.aiImportVariants && config.aiImportVariants.variants.length > 1 ? config.aiImportVariants.variants : undefined}
-              activeVariantIndex={config.aiImportVariants?.activeVariantIndex}
+              variants={config.aiImport ? (config.aiImportVariants?.variants ?? [config.aiImport]) : undefined}
+              activeVariantIndex={config.aiImportVariants?.activeVariantIndex ?? 0}
               onSwitchVariant={(i) => {
                 const vars = config.aiImportVariants!
                 const currentIdx = vars.activeVariantIndex
