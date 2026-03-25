@@ -507,6 +507,14 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
   const [pendingDeleteBaseName, setPendingDeleteBaseName] = useState<string | null>(null)
   const [pendingSelectBaseName, setPendingSelectBaseName] = useState<string | null>(null)
 
+  const hasUnsavedEdits = (aiImport: typeof config.aiImport): boolean => {
+    if (!aiImport) return false
+    return aiImport.editableFields.some(f => {
+      if (f.type === 'text') return f.value !== f.originalText
+      return f.scale !== 1 || (f.scaleY !== undefined && f.scaleY !== 1) || f.opacity !== 1
+    })
+  }
+
   const toggleSection = (section: string) => {
     setOpenSections((prev) =>
       prev.includes(section) ? prev.filter((s) => s !== section) : [...prev, section]
@@ -662,7 +670,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
                       key={g.baseName}
                       onClick={() => {
                         if (customizeMode) return
-                        if (config.aiImport) { setPendingSelectBaseName(g.baseName) } else { onSelectTemplate?.(g.baseName) }
+                        if (config.aiImport && hasUnsavedEdits(config.aiImport)) { setPendingSelectBaseName(g.baseName) } else { onSelectTemplate?.(g.baseName) }
                       }}
                       className={`rounded-xl overflow-hidden border-2 transition-all text-left relative ${
                         customizeMode
