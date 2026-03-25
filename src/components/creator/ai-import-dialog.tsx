@@ -1185,7 +1185,7 @@ export function AIImportDialog({ onImport, onClose }: AIImportDialogProps) {
                               <span className="text-gray-500">·</span>
                               <span className="text-gray-400">{boards.length} Format{boards.length !== 1 ? 'e' : ''}: {boards.map(b => {
                                 const r = b.width / b.height
-                                const fmt = ([[16/9,'16:9'],[9/16,'9:16'],[1,'1:1'],[4/5,'4:5'],[4/3,'4:3'],[3/4,'3:4']] as [number,string][])
+                                const fmt = ([[16/9,'16:9'],[9/16,'9:16'],[1,'1:1'],[4/5,'4:5'],[4/3,'4:3'],[3/4,'3:4'],[4/1,'4:1']] as [number,string][])
                                   .reduce((best, [rv, name]) => Math.abs(rv - r) < Math.abs(best[0] - r) ? [rv, name] : best)
                                 return fmt[1]
                               }).join(', ')}</span>

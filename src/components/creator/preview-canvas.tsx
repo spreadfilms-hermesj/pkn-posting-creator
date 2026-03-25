@@ -23,9 +23,10 @@ const FORMAT_LABELS: Record<Format, string> = {
   '4:5': '1080 × 1350 px',
   '16:9': '1920 × 1080 px',
   '9:16': '1080 × 1920 px',
+  '4:1': '2804 × 701 px',
 }
 
-const FORMATS: Format[] = ['1:1', '4:3', '3:4', '4:5', '16:9', '9:16']
+const FORMATS: Format[] = ['1:1', '4:3', '3:4', '4:5', '16:9', '9:16', '4:1']
 
 const FORMAT_ASPECT_RATIOS: [Format, number][] = [
   ['1:1', 1],
@@ -34,6 +35,7 @@ const FORMAT_ASPECT_RATIOS: [Format, number][] = [
   ['4:5', 4 / 5],
   ['16:9', 16 / 9],
   ['9:16', 9 / 16],
+  ['4:1', 4 / 1],
 ]
 
 function detectFormat(width: number, height: number): Format {

@@ -20,6 +20,7 @@ const FORMAT_RATIOS: [Format, number][] = [
   ['4:5', 4 / 5],
   ['16:9', 16 / 9],
   ['9:16', 9 / 16],
+  ['4:1', 4 / 1],
 ]
 
 function detectFormat(width: number, height: number): Format {
