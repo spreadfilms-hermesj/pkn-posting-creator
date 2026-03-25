@@ -257,7 +257,10 @@ export function ExportBar({ config, onSaveProject, onOpenUserProjects, userProje
   // In AI import mode, only show formats matching imported artboards
   const activeFormats = useMemo<Format[]>(() => {
     const allFormats: Format[] = ['1:1', '4:3', '3:4', '4:5', '16:9', '9:16', '4:1']
-    if (!config.aiImportVariants) return allFormats.filter(f => f !== '4:5' && f !== '4:1')
+    if (!config.aiImportVariants) {
+      if (config.aiImport) return [detectExportFormat(config.aiImport.artboardWidth, config.aiImport.artboardHeight)]
+      return allFormats.filter(f => f !== '4:5' && f !== '4:1')
+    }
     const seen = new Set<Format>()
     const result: Format[] = []
     for (const v of config.aiImportVariants.variants) {
