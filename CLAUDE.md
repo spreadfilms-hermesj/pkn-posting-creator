@@ -35,7 +35,7 @@ Everything visible on the canvas is derived from a single `PostingConfig` object
 - `AIImportVariants | null` — holds all imported artboard variants + active index
 
 ### Formats
-`Format` type: `'1:1' | '4:3' | '3:4' | '4:5' | '16:9' | '9:16'`
+`Format` type: `'1:1' | '4:3' | '3:4' | '4:5' | '16:9' | '9:16' | '4:1'`
 
 `FORMAT_DIMENSIONS` (in `src/types/posting.ts`):
 - `1:1` → 1080×1080
@@ -44,6 +44,9 @@ Everything visible on the canvas is derived from a single `PostingConfig` object
 - `4:5` → 1080×1350 (Instagram portrait)
 - `16:9` → 1920×1080
 - `9:16` → 1080×1920
+- `4:1` → 2804×701 (LinkedIn Banner)
+
+**Adding a new format:** update `Format` union + `FORMAT_DIMENSIONS` in `posting.ts`, `FORMAT_RATIOS`/`FORMAT_ASPECT_RATIOS` in `page.tsx` + `preview-canvas.tsx`, `FORMAT_RATIOS` + `allFormats` in `export-bar.tsx`, and the inline ratio array in `ai-import-dialog.tsx`. Custom/niche formats (4:5, 4:1) should be filtered out of the normal-mode export bar via the `allFormats.filter()` line.
 
 ### Rendering pipeline
 `PostingGraphic` (`src/components/creator/posting-graphic.tsx`) is the single source of truth for the visual. It renders at **native resolution** using inline `style` props — **no Tailwind inside the graphic** — because `html2canvas` cannot reliably handle Tailwind utility classes or CSS `backdrop-filter`.
@@ -56,6 +59,7 @@ Everything visible on the canvas is derived from a single `PostingConfig` object
 - **Always visible** in the top-right header, both in normal mode and AI import mode
 - **Normal mode**: all formats shown; clicking calls `updateConfig({ format })`
 - **AI import mode**: only formats matching an imported artboard are shown (ratio-based detection); clicking calls `onSwitchVariant(i)` to switch to the matching artboard
+- **Single-variant AI import**: format button still shown (falls back to detecting format from `config.aiImport` dimensions)
 - `detectFormat(width, height)` in `preview-canvas.tsx` picks the closest ratio from `FORMAT_ASPECT_RATIOS`
 - `variantFormatMap: Map<Format, number>` built via `useMemo` — maps format → variant index
 - `page.tsx` calls `detectFormat` on import and on variant switch to keep `config.format` in sync
@@ -124,12 +128,16 @@ Artboards are grouped by base name (stripping `_9:16` / `_16:9` etc. suffix) int
 - Only the AI Import editable fields section stays visible
 - `getBestVariant(variants)` in sidebar — picks variant closest to 16:9 ratio for thumbnail
 - `THUMB_W = 178` — computed from sidebar width 400px minus padding/gap
-- Warning dialog when switching to a new Post Type while already editing one
+- Warning dialog when switching to a new Post Type **only if edits have been made**
+  - `hasUnsavedEdits()` in sidebar compares current `editableFields` against saved template standard in `templateGroups` (not hardcoded defaults) — checks text value, scale, scaleY, opacity, imageUrl
+  - No dialog shown if switching from a freshly loaded (unedited) template
 
 **Super Admin Settings (collapsible, in sidebar):**
 - `adminOpen` state controls collapse
 - Contains: AI Import button, Anpassen (customize) button, "Als Template-Standard speichern" button
 - "Als Template-Standard speichern": saves current `editableFields` into `templateGroups` + `aiImportVariants`; shows `toast.success('Template-Standard gespeichert')`
+  - Also updates `originalText = value` for all text fields so saved state becomes the new baseline (no false "unsaved edits" after save)
+  - Also updates live `config.aiImport` with normalized fields
 - Anpassen mode: overlay on cards with Ersetzen / Entfernen (+ delete confirmation)
 
 ### User Projects (page.tsx)
@@ -149,7 +157,8 @@ Artboards are grouped by base name (stripping `_9:16` / `_16:9` etc. suffix) int
 - Used for: save project draft, save as template default
 
 ### Variant Switcher (preview-canvas.tsx)
-- Shown inline **below the main canvas** when AI import has >1 variant
+- Shown inline **below the main canvas** for any AI import (even single-variant)
+- `page.tsx` always passes `variants` array: `config.aiImportVariants?.variants ?? [config.aiImport]`
 - Renders live `PostingGraphic` thumbnails (scaled), active variant uses live `config.aiImport`
 - Format label shown (e.g. "16:9") instead of artboard name
 - Active variant highlighted with `border-cyan-400`
@@ -169,6 +178,11 @@ Artboards are grouped by base name (stripping `_9:16` / `_16:9` etc. suffix) int
 `ExportBar` uses `html2canvas` (dynamically imported). It briefly un-hides each fixed export container, pre-measures gradient element widths (because `getBoundingClientRect` returns 0 on hidden elements), then passes those widths into `html2canvas`'s `onclone` callback to fix gradient rendering. All formats can be exported at once as a ZIP via `jszip`.
 
 In AI import mode, export bypasses html2canvas entirely — uses a direct Canvas 2D composition (`captureAIVariant`) that draws background + graphic layers + text at native resolution.
+
+**Export format visibility rules:**
+- Normal mode: all formats except `4:5` and `4:1` (niche/platform-specific formats hidden by default)
+- AI import mode with `aiImportVariants`: only formats matching imported artboards (detected via `detectExportFormat`)
+- AI import mode without `aiImportVariants` (single variant): detects format from `config.aiImport` dimensions and shows only that format
 
 ### Adding a new post type
 1. Add the string literal to the `PostType` union in `src/types/posting.ts`
