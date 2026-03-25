@@ -509,9 +509,17 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
 
   const hasUnsavedEdits = (aiImport: typeof config.aiImport): boolean => {
     if (!aiImport) return false
-    return aiImport.editableFields.some(f => {
-      if (f.type === 'text') return f.value !== f.originalText
-      return f.scale !== 1 || (f.scaleY !== undefined && f.scaleY !== 1) || f.opacity !== 1
+    // Compare against saved template standard (not hardcoded defaults) so scale/opacity
+    // changes saved via "Als Template-Standard speichern" don't falsely trigger the dialog
+    const group = templateGroups.find(g => g.baseName === activeTemplateName)
+    const savedVariant = group?.variants.find(
+      v => v.artboardWidth === aiImport.artboardWidth && v.artboardHeight === aiImport.artboardHeight
+    ) ?? group?.variants[0]
+    return aiImport.editableFields.some((f, i) => {
+      const orig = savedVariant?.editableFields[i]
+      if (!orig) return f.type === 'text' ? f.value !== f.originalText : false
+      if (f.type === 'text') return f.value !== orig.value
+      return f.scale !== orig.scale || f.scaleY !== orig.scaleY || f.opacity !== orig.opacity || f.imageUrl !== orig.imageUrl
     })
   }
 
