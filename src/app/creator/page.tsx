@@ -177,22 +177,29 @@ export default function CreatorPage() {
 
   const saveAsDefault = useCallback(() => {
     if (!config.aiImport || !activeTemplateName) return
+    // Reset originalText = value so the saved state becomes the new baseline (no false "unsaved edits")
+    const normalizedFields = config.aiImport.editableFields.map(f =>
+      f.type === 'text' ? { ...f, originalText: f.value } : f
+    )
+    const normalizedImport = { ...config.aiImport, editableFields: normalizedFields }
     setTemplateGroups(prev => prev.map(g => {
       if (g.baseName !== activeTemplateName) return g
       const variantIdx = config.aiImportVariants?.activeVariantIndex ?? 0
       const updatedVariants = g.variants.map((v, vi) =>
-        vi === variantIdx ? { ...v, editableFields: config.aiImport!.editableFields } : v
+        vi === variantIdx ? { ...v, editableFields: normalizedFields } : v
       )
       return { ...g, variants: updatedVariants }
     }))
-    // Also sync into aiImportVariants so the live variants reflect the new default
+    // Also sync into aiImportVariants and live aiImport so baseline is consistent
+    const updates: Partial<typeof config> = { aiImport: normalizedImport }
     if (config.aiImportVariants) {
       const variantIdx = config.aiImportVariants.activeVariantIndex
       const updatedVariants = config.aiImportVariants.variants.map((v, vi) =>
-        vi === variantIdx ? { ...v, editableFields: config.aiImport!.editableFields } : v
+        vi === variantIdx ? { ...v, editableFields: normalizedFields } : v
       )
-      updateConfig({ aiImportVariants: { ...config.aiImportVariants, variants: updatedVariants } })
+      updates.aiImportVariants = { ...config.aiImportVariants, variants: updatedVariants }
     }
+    updateConfig(updates)
     toast.success('Template-Standard gespeichert')
   }, [config.aiImport, config.aiImportVariants, activeTemplateName, updateConfig])
 
