@@ -46,7 +46,9 @@ Everything visible on the canvas is derived from a single `PostingConfig` object
 - `9:16` → 1080×1920
 - `4:1` → 2804×701 (LinkedIn Banner)
 
-**Adding a new format:** update `Format` union + `FORMAT_DIMENSIONS` in `posting.ts`, `FORMAT_RATIOS`/`FORMAT_ASPECT_RATIOS` in `page.tsx` + `preview-canvas.tsx`, `FORMAT_RATIOS` + `allFormats` in `export-bar.tsx`, and the inline ratio array in `ai-import-dialog.tsx`. Custom/niche formats (4:5, 4:1) should be filtered out of the normal-mode export bar via the `allFormats.filter()` line.
+**Adding a new predefined format (normal mode):** update `Format` union + `FORMAT_DIMENSIONS` in `posting.ts`, `FORMAT_RATIOS` in `page.tsx`, `FORMATS` array in `preview-canvas.tsx`, `normalFormats` array in `export-bar.tsx`, and the inline ratio array in `ai-import-dialog.tsx`. Niche formats (4:5, 4:1) are excluded from `normalFormats` in export-bar.tsx.
+
+**AI import mode supports any artboard size automatically** — no format registration needed. Labels are computed via `computeRatioLabel` (GCD).
 
 ### Rendering pipeline
 `PostingGraphic` (`src/components/creator/posting-graphic.tsx`) is the single source of truth for the visual. It renders at **native resolution** using inline `style` props — **no Tailwind inside the graphic** — because `html2canvas` cannot reliably handle Tailwind utility classes or CSS `backdrop-filter`.
@@ -57,12 +59,12 @@ Everything visible on the canvas is derived from a single `PostingConfig` object
 
 ### Format Switcher (preview-canvas.tsx)
 - **Always visible** in the top-right header, both in normal mode and AI import mode
-- **Normal mode**: all formats shown; clicking calls `updateConfig({ format })`
-- **AI import mode**: only formats matching an imported artboard are shown (ratio-based detection); clicking calls `onSwitchVariant(i)` to switch to the matching artboard
-- **Single-variant AI import**: format button still shown (falls back to detecting format from `config.aiImport` dimensions)
-- `detectFormat(width, height)` in `preview-canvas.tsx` picks the closest ratio from `FORMAT_ASPECT_RATIOS`
-- `variantFormatMap: Map<Format, number>` built via `useMemo` — maps format → variant index
-- `page.tsx` calls `detectFormat` on import and on variant switch to keep `config.format` in sync
+- **Normal mode**: all predefined formats shown; clicking calls `updateConfig({ format })`
+- **AI import mode**: shows one button per imported artboard, label computed dynamically via `computeRatioLabel`; clicking calls `onSwitchVariant(i)` directly — supports **any artboard size**, not just predefined formats
+- Active button in AI import mode determined by `activeVariantIndex`, not `config.format`
+- `aiFormatButtons: { label: string; variantIdx: number }[]` built via `useMemo` — computed from actual artboard dimensions
+- `computeRatioLabel(w, h)` exported from `posting.ts` — uses GCD to simplify ratio (e.g. 1920×1080 → "16:9", 600×600 → "1:1", 800×500 → "8:5")
+- `page.tsx` still calls its own `detectFormat` (Format union) on import/variant switch to keep `config.format` in sync — this is a best-effort mapping for internal state, not used for display
 
 ### AI Import (`src/components/creator/ai-import-dialog.tsx`)
 Uses `pdfjs-dist` (v5, loaded dynamically on the client) to parse `.ai` files as PDFs:
@@ -160,10 +162,17 @@ Artboards are grouped by base name (stripping `_9:16` / `_16:9` etc. suffix) int
 - Shown inline **below the main canvas** for any AI import (even single-variant)
 - `page.tsx` always passes `variants` array: `config.aiImportVariants?.variants ?? [config.aiImport]`
 - Renders live `PostingGraphic` thumbnails (scaled), active variant uses live `config.aiImport`
-- Format label shown (e.g. "16:9") instead of artboard name
+- Label shown per variant = `computeRatioLabel(artboardWidth, artboardHeight)` — computed dynamically, supports any size
 - Active variant highlighted with `border-cyan-400`
 - Clicking calls `onSwitchVariant(i)` which updates `aiImport`, `aiImportVariants`, and `format` in `page.tsx`
 - Zoom: **Option (⌥) + scroll** to zoom in/out; Space + drag to pan
+
+### Sidebar field accordion (creator-sidebar.tsx)
+Each AI editable field renders as a collapsible accordion (`AIFieldItem`):
+- **Chevron arrow** (left of name) — `onClick={() => setOpen(v => !v)}` — only this toggles fold/unfold
+- **Layer name** — `onClick={() => onSelect?.()}` — selects the field in the canvas **without** toggling the accordion
+- `onSelect` prop flows: `AIFieldItem` ← `AIFieldList` ← `CreatorSidebar` ← `page.tsx` (`setSelectedFieldIndex`)
+- Do NOT put fold/unfold on the name click — they must remain separate
 
 ### Graphic layer scale controls (sidebar)
 - `scale: number` — horizontal/width scale (default 1)
@@ -180,9 +189,10 @@ Artboards are grouped by base name (stripping `_9:16` / `_16:9` etc. suffix) int
 In AI import mode, export bypasses html2canvas entirely — uses a direct Canvas 2D composition (`captureAIVariant`) that draws background + graphic layers + text at native resolution.
 
 **Export format visibility rules:**
-- Normal mode: all formats except `4:5` and `4:1` (niche/platform-specific formats hidden by default)
-- AI import mode with `aiImportVariants`: only formats matching imported artboards (detected via `detectExportFormat`)
-- AI import mode without `aiImportVariants` (single variant): detects format from `config.aiImport` dimensions and shows only that format
+- Normal mode: predefined formats in `normalFormats` array (excludes `4:5` and `4:1`)
+- AI import mode: `aiExportItems: { label: string; variant: AIImportData }[]` — one entry per unique artboard, label via `computeRatioLabel`, supports any imported size
+- Each AI export item exports its specific artboard at native resolution via `captureAIVariant`
+- Export containers (`id="export-{format}"`) rendered only in normal mode — AI mode bypasses html2canvas entirely
 
 ### Adding a new post type
 1. Add the string literal to the `PostType` union in `src/types/posting.ts`
