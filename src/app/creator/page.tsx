@@ -290,6 +290,7 @@ export default function CreatorPage() {
             customizeMode={customizeMode}
             onCustomizeModeChange={setCustomizeMode}
             onSaveAsDefault={config.aiImport && activeTemplateName ? saveAsDefault : undefined}
+            onSelectField={setSelectedFieldIndex}
           />
           {!(templateMode && !config.aiImport) && <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
             <PreviewCanvas

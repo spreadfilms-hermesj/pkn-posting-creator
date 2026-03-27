@@ -26,6 +26,7 @@ interface CreatorSidebarProps {
   customizeMode?: boolean
   onCustomizeModeChange?: (val: boolean) => void
   onSaveAsDefault?: () => void
+  onSelectField?: (index: number) => void
 }
 
 interface SectionProps {
@@ -80,6 +81,7 @@ function AIFieldItem({
   isSelected,
   aiImportVariants,
   originalField,
+  onSelect,
 }: {
   field: AIEditableField
   index: number
@@ -88,6 +90,7 @@ function AIFieldItem({
   isSelected: boolean
   aiImportVariants: AIImportVariants | null
   originalField?: AIEditableField
+  onSelect?: () => void
 }) {
   const [open, setOpen] = useState(true)
   const [scaleLinked, setScaleLinked] = useState(true)
@@ -278,18 +281,25 @@ function AIFieldItem({
     <div ref={ref} className="border-t border-white/10 first:border-t-0">
       {/* Header row — After Effects style */}
       <div className={`flex items-center gap-1 pr-2 transition-colors ${isSelected ? 'bg-cyan-500/10' : ''}`}>
-        <button
-          onClick={() => setOpen((v) => !v)}
-          className="flex-1 flex items-center gap-2 px-4 py-2 text-left hover:bg-white/5 min-w-0"
-        >
-          <ChevronDown
-            className={`w-3 h-3 shrink-0 transition-transform ${open ? '' : '-rotate-90'} ${isSelected ? 'text-cyan-400' : 'text-gray-500'}`}
-          />
-          <span className={`font-mono text-xs font-semibold tracking-wide truncate ${(field.opacity ?? 1) === 0 ? 'opacity-30' : ''} ${isSelected ? 'text-cyan-300' : 'text-cyan-400'}`}>{field.layerName}</span>
-          {field.isImageSlot && <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded shrink-0">Bild</span>}
-          {field.type === 'graphic' && !field.isImageSlot && <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded shrink-0">Grafik</span>}
-          {isSelected && <span className="ml-auto text-[10px] text-cyan-500 font-normal shrink-0">aktiv</span>}
-        </button>
+        <div className="flex-1 flex items-center min-w-0">
+          <button
+            onClick={() => setOpen((v) => !v)}
+            className="pl-4 pr-2 py-2 shrink-0 hover:bg-white/5 rounded"
+          >
+            <ChevronDown
+              className={`w-3 h-3 shrink-0 transition-transform ${open ? '' : '-rotate-90'} ${isSelected ? 'text-cyan-400' : 'text-gray-500'}`}
+            />
+          </button>
+          <button
+            onClick={() => onSelect?.()}
+            className="flex-1 flex items-center gap-2 pr-2 py-2 text-left hover:bg-white/5 min-w-0"
+          >
+            <span className={`font-mono text-xs font-semibold tracking-wide truncate ${(field.opacity ?? 1) === 0 ? 'opacity-30' : ''} ${isSelected ? 'text-cyan-300' : 'text-cyan-400'}`}>{field.layerName}</span>
+            {field.isImageSlot && <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded shrink-0">Bild</span>}
+            {field.type === 'graphic' && !field.isImageSlot && <span className="text-[10px] text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded shrink-0">Grafik</span>}
+            {isSelected && <span className="ml-auto text-[10px] text-cyan-500 font-normal shrink-0">aktiv</span>}
+          </button>
+        </div>
         {/* Reset to default */}
         {originalField && (
           <div className="relative shrink-0">
@@ -472,6 +482,7 @@ function AIFieldList({
   selectedFieldIndex,
   aiImportVariants,
   originalFields,
+  onSelectField,
 }: {
   fields: AIEditableField[]
   aiImport: AIImportData
@@ -479,6 +490,7 @@ function AIFieldList({
   selectedFieldIndex: number | null
   aiImportVariants: AIImportVariants | null
   originalFields?: AIEditableField[]
+  onSelectField?: (index: number) => void
 }) {
   if (fields.length === 0) {
     return (
@@ -492,13 +504,13 @@ function AIFieldList({
       {fields.map((field, i) => {
         if (field.type === 'graphic' && !field.imageUrl) return null
         if (field.isDecorativeLayer) return null
-        return <AIFieldItem key={i} field={field} index={i} aiImport={aiImport} updateConfig={updateConfig} isSelected={selectedFieldIndex === i} aiImportVariants={aiImportVariants} originalField={originalFields?.[i]} />
+        return <AIFieldItem key={i} field={field} index={i} aiImport={aiImport} updateConfig={updateConfig} isSelected={selectedFieldIndex === i} aiImportVariants={aiImportVariants} originalField={originalFields?.[i]} onSelect={() => onSelectField?.(i)} />
       })}
     </div>
   )
 }
 
-export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport, onRemoveTemplate, onReplaceTemplate, customizeMode = false, onCustomizeModeChange, onSaveAsDefault }: CreatorSidebarProps) {
+export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templateGroups = [], templateMode = false, activeTemplateName, onSelectTemplate, onOpenAIImport, onRemoveTemplate, onReplaceTemplate, customizeMode = false, onCustomizeModeChange, onSaveAsDefault, onSelectField }: CreatorSidebarProps) {
   const [openSections, setOpenSections] = useState<string[]>(['media', 'type', 'content'])
   const [postSelectorOpen, setPostSelectorOpen] = useState(true)
   const [templateSort, setTemplateSort] = useState<'default' | 'az' | 'za' | 'most' | 'least'>('default')
@@ -796,6 +808,7 @@ export function CreatorSidebar({ config, updateConfig, selectedFieldIndex, templ
               updateConfig={updateConfig}
               selectedFieldIndex={selectedFieldIndex}
               aiImportVariants={config.aiImportVariants ?? null}
+              onSelectField={onSelectField}
               originalFields={(() => {
                 if (!activeTemplateName) return undefined
                 const group = templateGroups.find(g => g.baseName === activeTemplateName)
