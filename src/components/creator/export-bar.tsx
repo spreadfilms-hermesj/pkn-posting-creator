@@ -2,22 +2,10 @@
 
 import React, { useState, useMemo } from 'react'
 import type { PostingConfig, Format, AIImportData } from '@/types/posting'
-import { FORMAT_DIMENSIONS } from '@/types/posting'
+import { FORMAT_DIMENSIONS, computeRatioLabel } from '@/types/posting'
 import { Download, FileImage, Loader2, LogOut, BookmarkPlus } from 'lucide-react'
 import { toast } from 'sonner'
 
-// ── Format helpers ─────────────────────────────────────────────────────────────
-
-const FORMAT_RATIOS: [Format, number][] = [
-  ['1:1', 1], ['4:3', 4 / 3], ['3:4', 3 / 4], ['4:5', 4 / 5], ['16:9', 16 / 9], ['9:16', 9 / 16], ['4:1', 4 / 1],
-]
-
-function detectExportFormat(w: number, h: number): Format {
-  const ratio = w / h
-  return FORMAT_RATIOS.reduce((best, [fmt, r]) =>
-    Math.abs(r - ratio) < Math.abs(FORMAT_RATIOS.find(([f]) => f === best)![1] - ratio) ? fmt : best
-  , FORMAT_RATIOS[0][0])
-}
 
 function getFontFamily(brandFont: string): string {
   if (brandFont === 'Segoe UI') return '"Segoe UI", system-ui, sans-serif'
@@ -254,39 +242,50 @@ interface ExportBarProps {
 export function ExportBar({ config, onSaveProject, onOpenUserProjects, userProjectCount = 0 }: ExportBarProps) {
   const [exporting, setExporting] = useState<string | null>(null)
 
-  // In AI import mode, only show formats matching imported artboards
-  const activeFormats = useMemo<Format[]>(() => {
-    const allFormats: Format[] = ['1:1', '4:3', '3:4', '4:5', '16:9', '9:16', '4:1']
-    if (!config.aiImportVariants) {
-      if (config.aiImport) return [detectExportFormat(config.aiImport.artboardWidth, config.aiImport.artboardHeight)]
-      return allFormats.filter(f => f !== '4:5' && f !== '4:1')
-    }
-    const seen = new Set<Format>()
-    const result: Format[] = []
-    for (const v of config.aiImportVariants.variants) {
-      const fmt = detectExportFormat(v.artboardWidth, v.artboardHeight)
-      if (!seen.has(fmt)) { seen.add(fmt); result.push(fmt) }
-    }
-    return result
-  }, [config.aiImportVariants])
-
-  // Resolve the correct AIImportData for a given format (active variant has user edits)
-  const getAIVariant = (format: Format): AIImportData | null => {
-    if (!config.aiImport) return null
-    if (!config.aiImportVariants) return config.aiImport
+  // AI import: ordered list of {label, variant} derived from actual artboard dimensions.
+  // Label computed via GCD so any imported size gets the correct X:Y string.
+  const aiExportItems = useMemo<{ label: string; variant: AIImportData }[]>(() => {
+    if (!config.aiImport) return []
     const { variants, activeVariantIndex } = config.aiImportVariants
-    const idx = variants.findIndex(v => detectExportFormat(v.artboardWidth, v.artboardHeight) === format)
-    if (idx === -1) return null
-    return idx === activeVariantIndex ? config.aiImport : variants[idx]
-  }
+      ?? { variants: [config.aiImport], activeVariantIndex: 0 }
+    const seen = new Set<string>()
+    const result: { label: string; variant: AIImportData }[] = []
+    variants.forEach((v, i) => {
+      const label = computeRatioLabel(v.artboardWidth, v.artboardHeight)
+      if (!seen.has(label)) {
+        seen.add(label)
+        // Active variant always uses config.aiImport so live edits are included
+        result.push({ label, variant: i === activeVariantIndex ? config.aiImport! : v })
+      }
+    })
+    return result
+  }, [config.aiImport, config.aiImportVariants])
+
+  // Normal mode: predefined formats minus niche ones
+  const normalFormats = useMemo<Format[]>(() => {
+    const all: Format[] = ['1:1', '4:3', '3:4', '4:5', '16:9', '9:16', '4:1']
+    return all.filter(f => f !== '4:5' && f !== '4:1')
+  }, [])
 
   const doCapture = async (format: Format): Promise<string> => {
-    const variant = getAIVariant(format)
-    if (variant) {
-      return captureAIVariant(variant, getFontFamily(config.brandSettings.fontFamily))
-    }
     await new Promise((r) => setTimeout(r, 200))
     return captureFormat(format)
+  }
+
+  const exportAISingle = async (label: string, variant: AIImportData) => {
+    if (exporting) return
+    setExporting(label)
+    try {
+      const dataUrl = await captureAIVariant(variant, getFontFamily(config.brandSettings.fontFamily))
+      const date = new Date().toISOString().slice(0, 10)
+      downloadDataUrl(dataUrl, `PKN_${label.replace(':', 'x')}_${date}.png`)
+      toast.success(`✓ ${label} exportiert`)
+    } catch (err) {
+      console.error('Export error:', err)
+      toast.error(`Export fehlgeschlagen: ${err instanceof Error ? err.message : 'Unbekannter Fehler'}`)
+    } finally {
+      setExporting(null)
+    }
   }
 
   const exportSingle = async (format: Format) => {
@@ -310,13 +309,26 @@ export function ExportBar({ config, onSaveProject, onOpenUserProjects, userProje
     const exports: { dataUrl: string; filename: string }[] = []
 
     try {
-      for (const format of activeFormats) {
-        try {
-          const dataUrl = await doCapture(format)
-          exports.push({ dataUrl, filename: getFilename(config, format) })
-        } catch (err) {
-          console.error(`Export ${format} failed:`, err)
-          toast.error(`${format} fehlgeschlagen`)
+      if (config.aiImport) {
+        for (const { label, variant } of aiExportItems) {
+          try {
+            const dataUrl = await captureAIVariant(variant, getFontFamily(config.brandSettings.fontFamily))
+            const date = new Date().toISOString().slice(0, 10)
+            exports.push({ dataUrl, filename: `PKN_${label.replace(':', 'x')}_${date}.png` })
+          } catch (err) {
+            console.error(`Export ${label} failed:`, err)
+            toast.error(`${label} fehlgeschlagen`)
+          }
+        }
+      } else {
+        for (const format of normalFormats) {
+          try {
+            const dataUrl = await doCapture(format)
+            exports.push({ dataUrl, filename: getFilename(config, format) })
+          } catch (err) {
+            console.error(`Export ${format} failed:`, err)
+            toast.error(`${format} fehlgeschlagen`)
+          }
         }
       }
 
@@ -392,17 +404,31 @@ export function ExportBar({ config, onSaveProject, onOpenUserProjects, userProje
               </>
             )}
 
-            {activeFormats.map((format) => (
-              <button
-                key={format}
-                onClick={() => exportSingle(format)}
-                disabled={isExporting}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                {exporting === format ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileImage className="w-3.5 h-3.5" />}
-                {format}
-              </button>
-            ))}
+            {config.aiImport ? (
+              aiExportItems.map(({ label, variant }) => (
+                <button
+                  key={label}
+                  onClick={() => exportAISingle(label, variant)}
+                  disabled={isExporting}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {exporting === label ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileImage className="w-3.5 h-3.5" />}
+                  {label}
+                </button>
+              ))
+            ) : (
+              normalFormats.map((format) => (
+                <button
+                  key={format}
+                  onClick={() => exportSingle(format)}
+                  disabled={isExporting}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 text-xs font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {exporting === format ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileImage className="w-3.5 h-3.5" />}
+                  {format}
+                </button>
+              ))
+            )}
 
             <div className="w-px h-8 bg-white/20 mx-1" />
 

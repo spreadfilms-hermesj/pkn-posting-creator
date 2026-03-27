@@ -2,7 +2,7 @@
 
 import React from 'react'
 import type { PostingConfig, Format, AIImportData } from '@/types/posting'
-import { FORMAT_DIMENSIONS } from '@/types/posting'
+import { FORMAT_DIMENSIONS, computeRatioLabel } from '@/types/posting'
 import { PostingGraphic } from './posting-graphic'
 
 interface PreviewCanvasProps {
@@ -28,22 +28,6 @@ const FORMAT_LABELS: Record<Format, string> = {
 
 const FORMATS: Format[] = ['1:1', '4:3', '3:4', '4:5', '16:9', '9:16', '4:1']
 
-const FORMAT_ASPECT_RATIOS: [Format, number][] = [
-  ['1:1', 1],
-  ['4:3', 4 / 3],
-  ['3:4', 3 / 4],
-  ['4:5', 4 / 5],
-  ['16:9', 16 / 9],
-  ['9:16', 9 / 16],
-  ['4:1', 4 / 1],
-]
-
-function detectFormat(width: number, height: number): Format {
-  const ratio = width / height
-  return FORMAT_ASPECT_RATIOS.reduce((best, [fmt, r]) =>
-    Math.abs(r - ratio) < Math.abs(FORMAT_ASPECT_RATIOS.find(([f]) => f === best)![1] - ratio) ? fmt : best
-  , FORMAT_ASPECT_RATIOS[0][0])
-}
 
 export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSelectField, variants, activeVariantIndex, onSwitchVariant, templateMode }: PreviewCanvasProps) {
 
@@ -157,25 +141,21 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
   }, [spaceDown, pan])
 
   // ── AI format switcher ───────────────────────────────────────────────────────
-  const variantFormatMap = React.useMemo<Map<Format, number>>(() => {
-    const map = new Map<Format, number>()
-    if (!config.aiImport || !variants) return map
+  // Build ordered list of {label, variantIdx} from actual artboard dimensions.
+  // Uses computeRatioLabel so any imported size gets the right X:Y label.
+  const aiFormatButtons = React.useMemo<{ label: string; variantIdx: number }[]>(() => {
+    if (!config.aiImport || !variants) return []
+    const seen = new Set<string>()
+    const result: { label: string; variantIdx: number }[] = []
     variants.forEach((v, i) => {
-      const fmt = detectFormat(v.artboardWidth, v.artboardHeight)
-      if (!map.has(fmt)) map.set(fmt, i)
+      const label = computeRatioLabel(v.artboardWidth, v.artboardHeight)
+      if (!seen.has(label)) { seen.add(label); result.push({ label, variantIdx: i }) }
     })
-    return map
+    return result
   }, [config.aiImport, variants])
 
-  const visibleFormats = config.aiImport ? FORMATS.filter(f => variantFormatMap.has(f)) : FORMATS
-
   const handleFormatClick = (format: Format) => {
-    if (config.aiImport && onSwitchVariant) {
-      const idx = variantFormatMap.get(format)
-      if (idx !== undefined) onSwitchVariant(idx)
-    } else {
-      updateConfig({ format })
-    }
+    updateConfig({ format })
   }
 
   // ── Derived values ───────────────────────────────────────────────────────────
@@ -217,19 +197,35 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
               </button>
             )}
             {/* Format switcher */}
-            {visibleFormats.map((format) => (
-              <button
-                key={format}
-                onClick={() => handleFormatClick(format)}
-                className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
-                  config.format === format
-                    ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/50'
-                    : 'bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white'
-                }`}
-              >
-                {format}
-              </button>
-            ))}
+            {config.aiImport ? (
+              aiFormatButtons.map(({ label, variantIdx }) => (
+                <button
+                  key={label}
+                  onClick={() => onSwitchVariant?.(variantIdx)}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    variantIdx === (activeVariantIndex ?? 0)
+                      ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/50'
+                      : 'bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))
+            ) : (
+              FORMATS.map((format) => (
+                <button
+                  key={format}
+                  onClick={() => handleFormatClick(format)}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
+                    config.format === format
+                      ? 'bg-cyan-500 text-white shadow-lg shadow-cyan-500/50'
+                      : 'bg-white/10 text-gray-400 hover:bg-white/20 hover:text-white'
+                  }`}
+                >
+                  {format}
+                </button>
+              ))
+            )}
           </div>
         </div>
 
@@ -293,7 +289,7 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
         {/* Mini Previews — normal mode */}
         {!config.aiImport && (
           <div className="mt-2 flex gap-4 justify-center flex-wrap">
-            {visibleFormats.map((format) => {
+            {FORMATS.map((format) => {
               const mini = getMiniScale(format)
               const { width: fw, height: fh } = FORMAT_DIMENSIONS[format]
               return (
@@ -325,10 +321,10 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
               const isActive = i === activeVariantIndex
               // Use live config.aiImport for active variant so edits are reflected immediately
               const variantConfig = { ...config, aiImport: isActive ? config.aiImport! : v }
-              const variantFormat = detectFormat(v.artboardWidth, v.artboardHeight)
+              const variantLabel = computeRatioLabel(v.artboardWidth, v.artboardHeight)
               return (
                 <div key={i} className="flex flex-col items-center gap-1">
-                  <p className={`text-xs font-semibold text-center ${isActive ? 'text-cyan-400' : 'text-gray-400'}`}>{variantFormat}</p>
+                  <p className={`text-xs font-semibold text-center ${isActive ? 'text-cyan-400' : 'text-gray-400'}`}>{variantLabel}</p>
                   <div
                     className={`relative rounded border overflow-hidden cursor-pointer transition-all ${
                       isActive ? 'border-cyan-400 shadow-lg shadow-cyan-500/30' : 'border-white/10 hover:border-cyan-500/50'
@@ -348,18 +344,9 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
         )}
       </div>
 
-      {/* Export containers (unchanged) */}
-      {FORMATS.map((format) => {
+      {/* Export containers — used by html2canvas in normal (non-AI) mode only */}
+      {!config.aiImport && FORMATS.map((format) => {
         const { width, height } = FORMAT_DIMENSIONS[format]
-        let exportConfig = { ...config, format }
-        if (config.aiImport && config.aiImportVariants) {
-          const variantIdx = variantFormatMap.get(format)
-          if (variantIdx === undefined) return null
-          const variantData = variantIdx === config.aiImportVariants.activeVariantIndex
-            ? config.aiImport
-            : config.aiImportVariants.variants[variantIdx]
-          exportConfig = { ...config, format, aiImport: variantData }
-        }
         return (
           <div
             key={format}
@@ -370,7 +357,7 @@ export function PreviewCanvas({ config, updateConfig, selectedFieldIndex, onSele
               overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none', zIndex: -9999,
             }}
           >
-            <PostingGraphic config={exportConfig} forExport={true} />
+            <PostingGraphic config={{ ...config, format }} forExport={true} />
           </div>
         )
       })}

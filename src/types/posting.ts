@@ -82,6 +82,14 @@ export type PostType =
 
 export type Format = '1:1' | '4:3' | '3:4' | '4:5' | '16:9' | '9:16' | '4:1'
 
+/** Compute simplified ratio label from pixel dimensions, e.g. 1920×1080 → "16:9", 600×600 → "1:1" */
+function gcd(a: number, b: number): number { return b === 0 ? a : gcd(b, a % b) }
+export function computeRatioLabel(w: number, h: number): string {
+  const rw = Math.round(w); const rh = Math.round(h)
+  const d = gcd(rw, rh)
+  return `${rw / d}:${rh / d}`
+}
+
 export interface CarouselSlide {
   id: string
   slideType: Exclude<PostType, 'carousel'>
